@@ -44,12 +44,34 @@ export class InfraStack extends cdk.Stack {
       allowAllOutbound: true,
     });
 
+    // Nextflow stages files with the AWS CLI, and biocontainers images don't ship one, so
+    // install the CLI into a self-contained Miniconda on each instance. Nextflow mounts /opt/miniconda into every
+    // task container (aws.batch.cliPath = /opt/miniconda/bin/aws). Conda carries its own
+    // libraries (the standalone CLI v2 binary failed in containers: no libz.so.1).
+    const cliUserData = ec2.UserData.forLinux();
+    cliUserData.addCommands(
+      'set -euo pipefail',
+      'cd /tmp',
+      'curl -sSfL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o miniconda.sh',
+      'bash miniconda.sh -b -f -p /opt/miniconda',
+      // pip, not conda install: conda's solver needs >3GB and was OOM-killed on a c5.large.
+      '/opt/miniconda/bin/pip install --no-cache-dir awscli',
+      '/opt/miniconda/bin/aws --version',
+    );
+    // Batch only accepts launch-template user data in MIME multipart format.
+    const multipartUserData = new ec2.MultipartUserData();
+    multipartUserData.addPart(ec2.MultipartBody.fromUserData(cliUserData));
+    const launchTemplate = new ec2.LaunchTemplate(this, 'ComputeLaunchTemplate', {
+      userData: multipartUserData,
+    });
+
     // Spot (cheap, interruptible) x86 instances. Scales to zero when idle;
     // maxvCpus caps the worst-case bill.
     const computeEnv = new batch.ManagedEc2EcsComputeEnvironment(this, 'ComputeEnv', {
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [computeSg],
+      launchTemplate,
       spot: true,
       allocationStrategy: batch.AllocationStrategy.SPOT_PRICE_CAPACITY_OPTIMIZED,
       instanceClasses: [ec2.InstanceClass.M5, ec2.InstanceClass.C5, ec2.InstanceClass.R5],
@@ -57,6 +79,14 @@ export class InfraStack extends cdk.Stack {
       minvCpus: 0,
       maxvCpus: 16,
     });
+
+    // CDK points Batch at the template's $Default version, and CloudFormation adds new
+    // versions without moving the default, so edits to the template would silently never
+    // take effect. Pin to the latest version number instead.
+    (computeEnv.node.defaultChild as batch.CfnComputeEnvironment).addPropertyOverride(
+      'ComputeResources.LaunchTemplate.Version',
+      launchTemplate.versionNumber,
+    );
 
     const jobQueue = new batch.JobQueue(this, 'JobQueue', {
       computeEnvironments: [{ computeEnvironment: computeEnv, order: 1 }],
