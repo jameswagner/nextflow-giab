@@ -19,10 +19,10 @@ Tick items off as they finish. Record decisions and surprises in the Notes secti
   - [x] VPC choice: public subnets with public IPs for compute, to avoid the NAT gateway cost (decide and record below)
   - [x] Batch Spot compute environment (x86), job queue, job role, instance role
   - [x] S3 permissions for the job role
-- [ ] Nextflow `awsbatch` profile (work dir in S3)
+- [x] Nextflow `awsbatch` profile (work dir in S3)
   - [x] Smoke test one tiny step (faidx) on Batch first
   - [x] Likely stretch point: Nextflow needs an AWS CLI on the compute host, and biocontainers images don't ship one (`aws.batch.cliPath` or a custom AMI). Find out on the smoke test and record the finding.
-  - [ ] Full pipeline on Batch with the toy data
+  - [x] Full pipeline on Batch with the toy data
 - [ ] CloudWatch: log retention, metric filter for GATK ERROR lines, alarm on failed jobs
 - [ ] `cdk destroy` and redeploy test (proves the infra is reproducible)
 - [ ] Validation on real data
@@ -50,3 +50,5 @@ S3 Files vs EBS comparison, Athena over results, a small web UI, Firehose, Healt
   4. `conda install awscli` was OOM-killed on a c5.large (4 GB RAM) during boot. Use `pip install awscli` into Miniconda at `/opt/miniconda`; `aws.batch.cliPath = '/opt/miniconda/bin/aws'`.
   Debugging tip: `aws ec2 get-console-output --instance-id <id> --latest` shows the user-data/cloud-init log, even after the instance is gone. Nextflow docs now recommend Wave + Fusion instead of the CLI; not adopted, a possible later comparison.
 - To consider after full-pipeline run: `aws.batch.maxTransferAttempts = 3`, `maxParallelTransfers`, `aws.client.maxConnections`, and `volumes = ['/var/lib/docker:/tmp:rw']` for GATK temp space (Fred Hutch config).
+- Full toy pipeline PASSED on Batch first try (12/12 steps, ~3 min compute, pennies). Outputs in `s3://<bucket>/results/` (filtered VCF + .tbi, MarkDuplicates metrics). Modules declare no resources, so `conf/awsbatch.config` sets `process.cpus = 2`, `process.memory = '6 GB'` for the toy run; revisit for real data.
+- Toy-data caveat: the final VCF has 0 records. Only 1.9% of reads (10,125 of 533,554) align to the 40 kb chr22 toy reference; HaplotypeCaller wrote a GVCF (4,477 records) but GenotypeGVCFs found no variant sites. Consistent with thin data, not a bug. Unknown whether the old EC2 run produced variants. Variant-calling quality is for the chr20 + GIAB validation stage. Put this caveat in the README.
