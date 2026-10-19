@@ -23,7 +23,7 @@ Tick items off as they finish. Record decisions and surprises in the Notes secti
   - [x] Smoke test one tiny step (faidx) on Batch first
   - [x] Likely stretch point: Nextflow needs an AWS CLI on the compute host, and biocontainers images don't ship one (`aws.batch.cliPath` or a custom AMI). Find out on the smoke test and record the finding.
   - [x] Full pipeline on Batch with the toy data
-- [ ] CloudWatch: log retention, metric filter for GATK ERROR lines, alarm on failed jobs
+- [x] CloudWatch: log retention, metric filter for GATK ERROR lines, alarm on failed jobs
 - [ ] `cdk destroy` and redeploy test (proves the infra is reproducible)
 - [ ] Validation on real data
   - [ ] chr20 reference and reads, GIAB truth VCF + high-confidence BED
@@ -52,3 +52,4 @@ S3 Files vs EBS comparison, Athena over results, a small web UI, Firehose, Healt
 - To consider after full-pipeline run: `aws.batch.maxTransferAttempts = 3`, `maxParallelTransfers`, `aws.client.maxConnections`, and `volumes = ['/var/lib/docker:/tmp:rw']` for GATK temp space (Fred Hutch config).
 - Full toy pipeline PASSED on Batch first try (12/12 steps, ~3 min compute, pennies). Outputs in `s3://<bucket>/results/` (filtered VCF + .tbi, MarkDuplicates metrics). Modules declare no resources, so `conf/awsbatch.config` sets `process.cpus = 2`, `process.memory = '6 GB'` for the toy run; revisit for real data.
 - Toy-data caveat: the final VCF has 0 records. Only 1.9% of reads (10,125 of 533,554) align to the 40 kb chr22 toy reference; HaplotypeCaller wrote a GVCF (4,477 records) but GenotypeGVCFs found no variant sites. Consistent with thin data, not a bug. Unknown whether the old EC2 run produced variants. Variant-calling quality is for the chr20 + GIAB validation stage. Put this caveat in the README.
+- CloudWatch deployed and tested: CDK-owned log group `/giab/batch-jobs` (30-day retention; Nextflow uses it via `aws.batch.logsGroup`) instead of Batch's auto-created, never-expiring `/aws/batch/job`, which CDK can't own and which is shared with any other Batch project in the account. Metric filter counts `ERROR`/`Exception` lines (`GiabPipeline/ErrorLines`); `FailedJobAlarm` watches Batch's native `AWS/Batch` `JobsMovedToFailed` metric for this queue (no charge). Healthy toy run: 0 matching lines, both alarms OK. `smoke/fail.nf` (always-failing job) tripped both alarms in about 4 minutes. SNS topic has no subscribers; add email with `cdk deploy -c alertEmail=<address>` (never in the repo).
