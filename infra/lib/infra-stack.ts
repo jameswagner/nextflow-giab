@@ -1,8 +1,13 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as batch from 'aws-cdk-lib/aws-batch';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as cwActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as sns from 'aws-cdk-lib/aws-sns';
+import * as subs from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
 
 export class InfraStack extends cdk.Stack {
@@ -99,6 +104,56 @@ export class InfraStack extends cdk.Stack {
       description: 'Nextflow task containers: read/write the pipeline bucket',
     });
     bucket.grantReadWrite(jobRole);
+
+    // --- Monitoring ---
+    // Batch auto-creates /aws/batch/job outside CloudFormation and never expires it, so
+    // we own a separate group instead (Nextflow: aws.batch.logsGroup in conf/awsbatch.config).
+    const jobLogs = new logs.LogGroup(this, 'JobLogs', {
+      logGroupName: '/giab/batch-jobs',
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    // Count log lines that look like GATK/Java failures.
+    const errorLines = jobLogs.addMetricFilter('ErrorLines', {
+      metricNamespace: 'GiabPipeline',
+      metricName: 'ErrorLines',
+      filterPattern: logs.FilterPattern.anyTerm('ERROR', 'Exception'),
+      metricValue: '1',
+      defaultValue: 0,
+    });
+
+    const alertTopic = new sns.Topic(this, 'AlertTopic');
+    // The email address is not stored in the repo: cdk deploy -c alertEmail=<address>
+    const alertEmail = this.node.tryGetContext('alertEmail');
+    if (alertEmail) {
+      alertTopic.addSubscription(new subs.EmailSubscription(alertEmail));
+    }
+
+    const errorAlarm = errorLines
+      .metric({ statistic: 'Sum', period: cdk.Duration.minutes(5) })
+      .createAlarm(this, 'ErrorLinesAlarm', {
+        alarmDescription: 'ERROR/Exception lines in pipeline job logs',
+        threshold: 1,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      });
+    // Batch publishes job-state metrics per queue (AWS/Batch, no charge); alarm on failures.
+    const failedJobAlarm = new cloudwatch.Metric({
+      namespace: 'AWS/Batch',
+      metricName: 'JobsMovedToFailed',
+      dimensionsMap: { JobQueueName: jobQueue.jobQueueName },
+      statistic: 'Sum',
+      period: cdk.Duration.minutes(5),
+    }).createAlarm(this, 'FailedJobAlarm', {
+      alarmDescription: 'A Batch job in the pipeline queue failed',
+      threshold: 1,
+      evaluationPeriods: 1,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    for (const alarm of [errorAlarm, failedJobAlarm]) {
+      alarm.addAlarmAction(new cwActions.SnsAction(alertTopic));
+    }
 
     new cdk.CfnOutput(this, 'BucketName', { value: bucket.bucketName });
     new cdk.CfnOutput(this, 'JobQueueName', { value: jobQueue.jobQueueName });
