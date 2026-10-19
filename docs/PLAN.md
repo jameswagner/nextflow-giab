@@ -2,12 +2,12 @@
 
 Tick items off as they finish. Record decisions and surprises in the Notes section at the bottom.
 
-- [ ] Write CLAUDE.md and docs/PLAN.md
+- [x] Write docs/PLAN.md (CLAUDE.md dropped by choice)
 - [ ] v0.1 housekeeping
-  - [ ] Move hardcoded paths to params; samplesheet CSV; `-profile test`
-  - [ ] Tidy the repo layout
+  - [x] Move hardcoded paths to params; samplesheet CSV; `-profile test` (lint only, not run)
+  - [x] Tidy the repo layout
   - [ ] README (what it does, how to run, toy-data caveat)
-  - [ ] .gitignore: work/, results/, .nextflow*, cdk.out, node_modules
+  - [x] .gitignore: work/, results/, .nextflow*, cdk.out, node_modules
   - [ ] Create public GitHub repo, push, tag v0.1 (user handles GitHub auth)
 - [ ] CDK TypeScript, first slice
   - [ ] `cdk init`, `cdk bootstrap`, S3 bucket (versioned, encrypted, blocked public access)
@@ -37,4 +37,5 @@ S3 Files vs EBS comparison, Athena over results, a small web UI, Firehose, Healt
 
 ## Notes (decisions and surprises)
 
-- The git repo is the `variant-pipeline/` folder inside `~/Projects/nextflow-aws/`; CLAUDE.md and docs/ live there so they ship with the public repo.
+- Repo lives at `~/Projects/nextflow-giab` (renamed from `variant-pipeline`). Git history was reset to a clean initial commit. Layout: `main.nf`, `modules/` (by tool), `conf/`, `assets/`, later `infra/` for CDK.
+- Toy-data work is done as far as local effort goes: params, samplesheet and `-profile test` are written and lint-clean, but not yet run end to end after the refactor. Verify on the first Batch run.
