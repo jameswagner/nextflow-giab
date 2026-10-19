@@ -10,8 +10,8 @@ Tick items off as they finish. Record decisions and surprises in the Notes secti
   - [x] .gitignore: work/, results/, .nextflow*, cdk.out, node_modules
   - [ ] Create public GitHub repo, push, tag v0.1 (user handles GitHub auth)
 - [ ] CDK TypeScript, first slice
-  - [ ] `cdk init`, `cdk bootstrap`, S3 bucket (versioned, encrypted, blocked public access)
-  - [ ] Deploy and confirm the bucket exists
+  - [x] `cdk init`, `cdk bootstrap`, S3 bucket (versioned, encrypted, blocked public access)
+  - [x] Deploy and confirm the bucket exists
 - [ ] Get the toy data into S3 (reference, FASTQs, dbSNP and Mills VCFs with .tbi).
       Either re-clone nf-core/test-datasets at commit 76179c1c8765b0233ba72d3fb82bc142f1d92b13
       (data/genomics/homo_sapiens only, via sparse checkout) or copy from the EC2 box.
@@ -39,3 +39,4 @@ S3 Files vs EBS comparison, Athena over results, a small web UI, Firehose, Healt
 
 - Repo lives at `~/Projects/nextflow-giab` (renamed from `variant-pipeline`). Git history was reset to a clean initial commit. Layout: `main.nf`, `modules/` (by tool), `conf/`, `assets/`, later `infra/` for CDK.
 - Toy-data work is done as far as local effort goes: params, samplesheet and `-profile test` are written and lint-clean, but not yet run end to end after the refactor. Verify on the first Batch run.
+- CDK bootstrap: us-east-1 already had a shared `CDKToolkit` stack from older projects (qualifier `newstack`), so this project has its own: qualifier `giab`, stack `CDKToolkit-giab`, both set in `infra/cdk.json`. Do not re-bootstrap with the default qualifier. S3 bucket deployed (InfraStack); name is a stack output, not recorded here.
