@@ -3,25 +3,36 @@ include { BWAMEM2_INDEX; BWAMEM2_MEM } from './modules/bwamem2.nf'
 include { GATK_DICT; GATK_MARKDUPLICATES; GATK_BASERECALIBRATOR; GATK_APPLYBQSR;
           GATK_HAPLOTYPECALLER; GATK_GENOTYPEGVCFS; GATK_HARDFILTER } from './modules/gatk.nf'
 
+params {
+    samplesheet: Path   // CSV: sample_id,fastq_1,fastq_2
+    fasta:       Path   // GRCh38 reference
+    dbsnp:       Path
+    dbsnp_tbi:   Path
+    mills:       Path
+    mills_tbi:   Path
+}
+
 workflow {
     main:
 
     // --- inputs ---
-    fasta = channel.fromPath('/home/ec2-user/test-datasets/data/genomics/homo_sapiens/genome/genome.fasta')
+    // One tuple per sample: (sample_id, [fastq_1, fastq_2]). Everything downstream
+    // is keyed on sample_id, never on channel order.
+    reads = channel.fromPath(params.samplesheet)
+        .splitCsv(header: true)
+        .map { row ->
+            tuple(row.sample_id, [
+                file(row.fastq_1, checkIfExists: true),
+                file(row.fastq_2, checkIfExists: true)
+            ])
+        }
 
-    reads = channel.of([
-        'test',
-        [
-            file('/home/ec2-user/test-datasets/data/genomics/homo_sapiens/illumina/fastq/test_1.fastq.gz'),
-            file('/home/ec2-user/test-datasets/data/genomics/homo_sapiens/illumina/fastq/test_2.fastq.gz')
-        ]
-    ])
-
-    vcf_dir = '/home/ec2-user/test-datasets/data/genomics/homo_sapiens/genome/vcf'
-    dbsnp   = channel.fromPath("${vcf_dir}/dbsnp_146.hg38.vcf.gz")
-    dbsnp_i = channel.fromPath("${vcf_dir}/dbsnp_146.hg38.vcf.gz.tbi")
-    mills   = channel.fromPath("${vcf_dir}/mills_and_1000G.indels.vcf.gz")
-    mills_i = channel.fromPath("${vcf_dir}/mills_and_1000G.indels.vcf.gz.tbi")
+    // Reference files are plain values, so they are shared by every sample.
+    fasta   = params.fasta
+    dbsnp   = params.dbsnp
+    dbsnp_i = params.dbsnp_tbi
+    mills   = params.mills
+    mills_i = params.mills_tbi
 
     // --- reference prep ---
     SAMTOOLS_FAIDX(fasta)

@@ -1,2 +1,7 @@
 work/
+results/
 .nextflow*
+cdk.out/
+node_modules/
+test-data/
+*~
