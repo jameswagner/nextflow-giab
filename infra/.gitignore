@@ -6,3 +6,6 @@ node_modules
 # CDK asset staging directory
 .cdk.staging
 cdk.out
+
+# Contains the AWS account ID in its keys; never commit
+cdk.context.json

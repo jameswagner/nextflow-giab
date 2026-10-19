@@ -17,8 +17,8 @@ Tick items off as they finish. Record decisions and surprises in the Notes secti
       (data/genomics/homo_sapiens only, via sparse checkout) or copy from the EC2 box.
 - [ ] CDK, Batch slice
   - [x] VPC choice: public subnets with public IPs for compute, to avoid the NAT gateway cost (decide and record below)
-  - [ ] Batch Spot compute environment (x86), job queue, job role, instance role
-  - [ ] S3 permissions for the job role
+  - [x] Batch Spot compute environment (x86), job queue, job role, instance role
+  - [x] S3 permissions for the job role
 - [ ] Nextflow `awsbatch` profile (work dir in S3)
   - [ ] Smoke test one tiny step (faidx) on Batch first
   - [ ] Likely stretch point: Nextflow needs an AWS CLI on the compute host, and biocontainers images don't ship one (`aws.batch.cliPath` or a custom AMI). Find out on the smoke test and record the finding.
@@ -42,3 +42,4 @@ S3 Files vs EBS comparison, Athena over results, a small web UI, Firehose, Healt
 - CDK bootstrap: us-east-1 already had a shared `CDKToolkit` stack from older projects (qualifier `newstack`), so this project has its own: qualifier `giab`, stack `CDKToolkit-giab`, both set in `infra/cdk.json`. Do not re-bootstrap with the default qualifier. S3 bucket deployed (InfraStack); name is a stack output, not recorded here.
 - Toy data is in the bucket under `test-data/` (7 files, ~33 MB: genome.fasta, dbsnp and Mills VCFs + .tbi, test_1/test_2 FASTQ), same layout as `params.test_data` expects. Source: sparse checkout of nf-core/test-datasets at 76179c1; the EC2 box is deleted, so re-clone if needed (the full homo_sapiens dir is 2.5 GB, only these files are needed).
 - VPC decision: public subnets with public IPs for Batch compute, no NAT gateway (saves ~$32/month plus data fees). Security groups allow no inbound traffic; outbound only.
+- Batch deployed: Spot x86 (m5/c5/r5), 0 to 16 vCPUs, public subnets, no NAT. Job role is read/write on the pipeline bucket only. Queue name, job role ARN and bucket come from the stack outputs (`aws cloudformation describe-stacks --stack-name InfraStack`) and are passed to Nextflow via `GIAB_BATCH_QUEUE`, `GIAB_JOB_ROLE` and `-work-dir`, never committed. `infra/cdk.context.json` is gitignored because its keys contain the account ID.
