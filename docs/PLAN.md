@@ -6,7 +6,7 @@ Tick items off as they finish. Record decisions and surprises in the Notes secti
 - [ ] v0.1 housekeeping
   - [x] Move hardcoded paths to params; samplesheet CSV; `-profile test` (lint only, not run)
   - [x] Tidy the repo layout
-  - [ ] README (what it does, how to run, toy-data caveat)
+  - [x] README (what it does, how to run, toy-data caveat)
   - [x] .gitignore: work/, results/, .nextflow*, cdk.out, node_modules
   - [ ] Create public GitHub repo, push, tag v0.1 (user handles GitHub auth)
 - [ ] CDK TypeScript, first slice
@@ -24,7 +24,7 @@ Tick items off as they finish. Record decisions and surprises in the Notes secti
   - [x] Likely stretch point: Nextflow needs an AWS CLI on the compute host, and biocontainers images don't ship one (`aws.batch.cliPath` or a custom AMI). Find out on the smoke test and record the finding.
   - [x] Full pipeline on Batch with the toy data
 - [x] CloudWatch: log retention, metric filter for GATK ERROR lines, alarm on failed jobs
-- [ ] `cdk destroy` and redeploy test (proves the infra is reproducible)
+- [x] `cdk destroy` and redeploy test (proves the infra is reproducible)
 - [ ] Validation on real data
   - [ ] chr20 reference and reads, GIAB truth VCF + high-confidence BED
   - [ ] hap.py precision/recall, metrics.json
@@ -53,3 +53,4 @@ S3 Files vs EBS comparison, Athena over results, a small web UI, Firehose, Healt
 - Full toy pipeline PASSED on Batch first try (12/12 steps, ~3 min compute, pennies). Outputs in `s3://<bucket>/results/` (filtered VCF + .tbi, MarkDuplicates metrics). Modules declare no resources, so `conf/awsbatch.config` sets `process.cpus = 2`, `process.memory = '6 GB'` for the toy run; revisit for real data.
 - Toy-data caveat: the final VCF has 0 records. Only 1.9% of reads (10,125 of 533,554) align to the 40 kb chr22 toy reference; HaplotypeCaller wrote a GVCF (4,477 records) but GenotypeGVCFs found no variant sites. Consistent with thin data, not a bug. Unknown whether the old EC2 run produced variants. Variant-calling quality is for the chr20 + GIAB validation stage. Put this caveat in the README.
 - CloudWatch deployed and tested: CDK-owned log group `/giab/batch-jobs` (30-day retention; Nextflow uses it via `aws.batch.logsGroup`) instead of Batch's auto-created, never-expiring `/aws/batch/job`, which CDK can't own and which is shared with any other Batch project in the account. Metric filter counts `ERROR`/`Exception` lines (`GiabPipeline/ErrorLines`); `FailedJobAlarm` watches Batch's native `AWS/Batch` `JobsMovedToFailed` metric for this queue (no charge). Healthy toy run: 0 matching lines, both alarms OK. `smoke/fail.nf` (always-failing job) tripped both alarms in about 4 minutes. SNS topic has no subscribers; add email with `cdk deploy -c alertEmail=<address>` (never in the repo).
+- `cdk destroy` and redeploy test passed: destroy took ~2.5 min (bucket and its 283 objects included, nothing left behind), redeploy ~3 min (34 resources), toy data re-uploaded, then the full toy pipeline passed 12/12 with logs in the new log group and both alarms OK. No manual fixes needed. Resource names change on every rebuild, so always read them from the stack outputs.
