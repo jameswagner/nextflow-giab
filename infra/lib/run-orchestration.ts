@@ -9,6 +9,9 @@ import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import { Construct } from 'constructs';
 
+const PROJECT_TAG_KEY = 'project';
+const PROJECT_TAG_VALUE = 'nextflow-giab';
+
 export interface RunOrchestrationProps {
   readonly bucket: s3.IBucket;
   readonly launcherQueue: batch.IJobQueue;
@@ -95,6 +98,8 @@ export class RunOrchestration extends Construct {
           JobQueue: props.launcherQueue.jobQueueArn,
           JobDefinition: props.launcherJobDefinition.jobDefinitionArn,
           ContainerOverrides: { Command: `{% ${command} %}` },
+          // Lets TerminateJob below be limited to jobs this state machine started.
+          Tags: { [PROJECT_TAG_KEY]: PROJECT_TAG_VALUE },
         },
       },
     });
@@ -182,6 +187,7 @@ export class RunOrchestration extends Construct {
       definitionBody: sfn.DefinitionBody.fromChainable(definition),
       queryLanguage: sfn.QueryLanguage.JSONATA,
       timeout: cdk.Duration.hours(26), // the launcher job itself times out at 24 h
+      // CDK grants the logs:*LogDelivery actions on '*' for this; AWS requires '*' for log delivery.
       logs: {
         destination: new logs.LogGroup(this, 'StateMachineLogs', {
           retention: logs.RetentionDays.ONE_MONTH,
@@ -199,9 +205,27 @@ export class RunOrchestration extends Construct {
         `arn:${stack.partition}:batch:${stack.region}:${stack.account}:job-definition/${props.launcherJobDefinition.jobDefinitionName}*`,
       ],
     }));
+    // DescribeJobs has no resource-level permissions in IAM, so it must be '*'. It is read-only.
     this.stateMachine.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['batch:DescribeJobs', 'batch:TerminateJob'],
+      actions: ['batch:DescribeJobs'],
       resources: ['*'],
+    }));
+    // Stopping an execution terminates its launcher job. Only jobs carrying our tag can be terminated,
+    // so the state machine cannot cancel other Batch jobs in the account.
+    const anyJob = `arn:${stack.partition}:batch:${stack.region}:${stack.account}:job/*`;
+    this.stateMachine.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['batch:TerminateJob'],
+      resources: [anyJob],
+      conditions: { StringEquals: { [`aws:ResourceTag/${PROJECT_TAG_KEY}`]: PROJECT_TAG_VALUE } },
+    }));
+    // Tag-on-submit needs TagResource, limited to setting exactly that one tag.
+    this.stateMachine.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['batch:TagResource'],
+      resources: [anyJob],
+      conditions: {
+        'StringEquals': { [`aws:RequestTag/${PROJECT_TAG_KEY}`]: PROJECT_TAG_VALUE },
+        'ForAllValues:StringEquals': { 'aws:TagKeys': [PROJECT_TAG_KEY] },
+      },
     }));
     this.stateMachine.addToRolePolicy(new iam.PolicyStatement({
       actions: ['events:PutTargets', 'events:PutRule', 'events:DescribeRule'],
