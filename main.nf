@@ -1,5 +1,6 @@
 include { SAMTOOLS_FAIDX; SAMTOOLS_SORT; SAMTOOLS_FLAGSTAT } from './modules/samtools.nf'
 include { BWAMEM2_INDEX; BWAMEM2_MEM } from './modules/bwamem2.nf'
+include { RTG_FORMAT; RTG_VCFEVAL } from './modules/rtg.nf'
 include { GATK_DICT; GATK_MARKDUPLICATES; GATK_BASERECALIBRATOR; GATK_APPLYBQSR;
           GATK_HAPLOTYPECALLER; GATK_GENOTYPEGVCFS; GATK_HARDFILTER } from './modules/gatk.nf'
 
@@ -10,6 +11,12 @@ params {
     dbsnp_tbi:   Path
     mills:       Path
     mills_tbi:   Path
+
+    // Optional: score the calls against a truth set (e.g. GIAB). Give all four to enable.
+    truth_vcf:     Path?
+    truth_vcf_tbi: Path?
+    truth_bed:     Path?   // high-confidence regions
+    eval_region:   String? // e.g. chr20
 }
 
 workflow {
@@ -58,9 +65,20 @@ workflow {
     GATK_GENOTYPEGVCFS(GATK_HAPLOTYPECALLER.out, fasta, SAMTOOLS_FAIDX.out, GATK_DICT.out)
     GATK_HARDFILTER(GATK_GENOTYPEGVCFS.out, fasta, SAMTOOLS_FAIDX.out, GATK_DICT.out)
 
+    // --- score against a truth set, if one was given ---
+    benchmark = channel.empty()
+    if( params.truth_vcf ) {
+        RTG_FORMAT(fasta)
+        RTG_VCFEVAL(
+            GATK_HARDFILTER.out, RTG_FORMAT.out,
+            params.truth_vcf, params.truth_vcf_tbi, params.truth_bed, params.eval_region)
+        benchmark = RTG_VCFEVAL.out
+    }
+
     publish:
-    vcf     = GATK_HARDFILTER.out
-    metrics = GATK_MARKDUPLICATES.out.metrics
+    vcf       = GATK_HARDFILTER.out
+    metrics   = GATK_MARKDUPLICATES.out.metrics
+    benchmark = benchmark
 }
 
 output {
@@ -69,5 +87,8 @@ output {
     }
     metrics {
         path 'qc'
+    }
+    benchmark {
+        path 'benchmark'
     }
 }
