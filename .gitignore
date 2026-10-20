@@ -5,3 +5,6 @@ cdk.out/
 node_modules/
 test-data/
 *~
+
+# Working plan, kept locally only
+docs/PLAN.md

@@ -47,4 +47,4 @@ Scored with RTG `vcfeval` against the GIAB v4.2.1 truth set for HG002 (GRCh38), 
 
 This is one sample and one chromosome, scored with the conservative `_noinconsistent` BED, so it is a sanity check and not a validation. The library was designed for assembly (overlapping 2x250 reads), vcfeval skipped at least one region as too complex, and about 27% of calls fall outside the high-confidence regions and are not scored. To score a run, pass `--truth_vcf`, `--truth_vcf_tbi`, `--truth_bed` and `--eval_region`; the result is in `benchmark/<sample>.vcfeval/`, with a `metrics.json` summary alongside vcfeval's own files.
 
-The default test data (nf-core/test-datasets, commit `76179c1`) is a 40 kb slice of chr22 and only about 2% of its reads align, so it gives an empty VCF; it checks the plumbing, not accuracy. See `docs/PLAN.md` for the full history.
+The default test data (nf-core/test-datasets, commit `76179c1`) is a 40 kb slice of chr22 and only about 2% of its reads align, so it gives an empty VCF; it checks the plumbing, not accuracy.
