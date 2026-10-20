@@ -1,0 +1,55 @@
+name: Deploy infrastructure
+
+# Deploys InfraStack when infrastructure code lands on main. The `production` environment requires
+# a person to approve each deploy, and its OIDC role can only use this project's CDK bootstrap roles.
+# The GitHub identity stack is never deployed from here: changes to it are deployed by hand, so a
+# pull request cannot change the permissions of the workflows that run it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - infra/**
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy InfraStack
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    permissions:
+      contents: read   # check out the CDK app
+      id-token: write  # OIDC token for the deploy role
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - run: npm ci
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+          role-session-name: deploy
+
+      - name: Show what will change
+        run: npx cdk diff InfraStack
+
+      - name: Deploy
+        run: npx cdk deploy InfraStack --require-approval never

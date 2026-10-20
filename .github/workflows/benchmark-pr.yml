@@ -1,0 +1,89 @@
+name: Benchmark a pull request
+
+# Runs a pull request's head commit through the HG002 chr20 benchmark on AWS and posts the scores to
+# the PR. Started by hand: Actions tab > "Benchmark a pull request", or `gh workflow run benchmark-pr.yml -f pr=<number>`.
+#
+# Security: only people with write access can start a workflow_dispatch run (GitHub enforces this),
+# and the `benchmark` environment only accepts runs of the workflow from main, so a PR cannot change
+# what this job does. PRs from forks are refused, the exact head commit SHA is run (later pushes cannot
+# swap the code), and the PR number is checked to be a number before it is used. AWS access comes from
+# the environment's OIDC role, which can only start and read benchmark runs. Review the PR's code
+# before starting a run: the pipeline it contains runs on AWS.
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number
+        required: true
+        type: number
+
+permissions: {}
+
+concurrency:
+  group: benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: Benchmark the pull request on AWS
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    environment: benchmark
+    permissions:
+      contents: read        # check out main's scripts
+      pull-requests: write  # read the PR and post the result
+      id-token: write       # OIDC token for the benchmark role
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR: ${{ inputs.pr }}
+    steps:
+      - name: Resolve the pull request
+        id: pr
+        run: |
+          case "$PR" in ''|*[!0-9]*) echo "::error::pr must be a number"; exit 1 ;; esac
+          info=$(gh pr view "$PR" --repo "$REPO" --json headRefOid,baseRefOid,isCrossRepository,state \
+            --jq '"\(.headRefOid) \(.baseRefOid) \(.isCrossRepository) \(.state)"')
+          read -r head base fork state <<<"$info"
+          if [ "$fork" = "true" ]; then echo "::error::pull requests from forks are not benchmarked"; exit 1; fi
+          if [ "$state" != "OPEN" ]; then echo "::error::pull request $PR is $state"; exit 1; fi
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+
+      - name: Acknowledge
+        env:
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
+        run: gh pr comment "$PR" --repo "$REPO" --body "Benchmark started for commit \`$HEAD_SHA\` (HG002 chr20 against GIAB, about an hour). Results will be posted here."
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_BENCHMARK_ROLE_ARN }}
+          aws-region: us-east-1
+          role-duration-seconds: 14400
+          role-session-name: benchmark-pr
+
+      - name: Run the benchmark and wait
+        env:
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
+          BASE_SHA: ${{ steps.pr.outputs.base }}
+        run: scripts/run-benchmark.sh -r "$HEAD_SHA" -t pr -P "$PR" -b "$BASE_SHA" -w
+
+      - name: Post the result to the pull request
+        if: always() && steps.pr.outcome == 'success'
+        run: |
+          if [ -f benchmark-result.md ]; then
+            gh pr comment "$PR" --repo "$REPO" --body-file benchmark-result.md
+          else
+            gh pr comment "$PR" --repo "$REPO" --body "Benchmark did not produce a result; see the workflow run log."
+          fi
+
+      - name: Stop the AWS run if this job was cancelled
+        if: cancelled()
+        run: |
+          if [ -f execution-arn.txt ]; then
+            aws stepfunctions stop-execution --execution-arn "$(cat execution-arn.txt)" --error Cancelled --cause "GitHub workflow cancelled"
+          fi

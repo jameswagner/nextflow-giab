@@ -1,0 +1,14 @@
+# Inputs for the HG002 chr20 benchmark, one flag and value per line. @BUCKET@ is replaced with the
+# pipeline bucket from the InfraStack outputs, so no bucket name is committed. Used by scripts/run-benchmark.sh.
+--samplesheet s3://@BUCKET@/giab-hg002/samplesheet.hg002.csv
+--fasta s3://@BUCKET@/giab-hg002/ref/chr20.fasta
+--dbsnp s3://@BUCKET@/giab-hg002/known/dbsnp138.chr20.vcf.gz
+--dbsnp_tbi s3://@BUCKET@/giab-hg002/known/dbsnp138.chr20.vcf.gz.tbi
+--mills s3://@BUCKET@/giab-hg002/known/mills_1000G.chr20.vcf.gz
+--mills_tbi s3://@BUCKET@/giab-hg002/known/mills_1000G.chr20.vcf.gz.tbi
+--truth_vcf s3://@BUCKET@/giab-hg002/truth/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz
+--truth_vcf_tbi s3://@BUCKET@/giab-hg002/truth/HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz.tbi
+--truth_bed s3://@BUCKET@/giab-hg002/truth/HG002_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed
+--eval_region chr20
+--truth_set "GIAB HG002 NISTv4.2.1 GRCh38"
+--baseline benchmarks/hg002-chr20.json

@@ -1,0 +1,58 @@
+name: Benchmark (main)
+
+# Records an official benchmark run for each change to the pipeline that lands on main, and fails
+# visibly if the scores regressed against the committed baseline. Can also be started by hand.
+# Only changes to pipeline files trigger it, since each run costs about a dollar of AWS compute.
+on:
+  push:
+    branches: [main]
+    paths:
+      - main.nf
+      - nextflow.config
+      - modules/**
+      - conf/**
+      - bin/**
+      - benchmarks/**
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: Record the benchmark for this commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    environment: benchmark
+    permissions:
+      contents: read   # check out the scripts
+      id-token: write  # OIDC token for the benchmark role
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_BENCHMARK_ROLE_ARN }}
+          aws-region: us-east-1
+          role-duration-seconds: 14400
+          role-session-name: benchmark-main
+
+      - name: Run the benchmark and wait
+        run: scripts/run-benchmark.sh -r "$GITHUB_SHA" -t main -w
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f benchmark-result.md ]; then cat benchmark-result.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Stop the AWS run if this job was cancelled
+        if: cancelled()
+        run: |
+          if [ -f execution-arn.txt ]; then
+            aws stepfunctions stop-execution --execution-arn "$(cat execution-arn.txt)" --error Cancelled --cause "GitHub workflow cancelled"
+          fi
