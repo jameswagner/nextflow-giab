@@ -218,10 +218,15 @@ export class RunOrchestration extends Construct {
       resources: [anyJob],
       conditions: { StringEquals: { [`aws:ResourceTag/${PROJECT_TAG_KEY}`]: PROJECT_TAG_VALUE } },
     }));
-    // Tag-on-submit needs TagResource, limited to setting exactly that one tag.
+    // Tag-on-submit needs TagResource, limited to setting exactly that one tag. Batch checks it on
+    // the new job and also on the job definition (and queue) named in the SubmitJob request.
     this.stateMachine.addToRolePolicy(new iam.PolicyStatement({
       actions: ['batch:TagResource'],
-      resources: [anyJob],
+      resources: [
+        anyJob,
+        `arn:${stack.partition}:batch:${stack.region}:${stack.account}:job-definition/${props.launcherJobDefinition.jobDefinitionName}:*`,
+        props.launcherQueue.jobQueueArn,
+      ],
       conditions: {
         'StringEquals': { [`aws:RequestTag/${PROJECT_TAG_KEY}`]: PROJECT_TAG_VALUE },
         'ForAllValues:StringEquals': { 'aws:TagKeys': [PROJECT_TAG_KEY] },
