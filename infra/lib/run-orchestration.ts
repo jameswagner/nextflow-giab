@@ -72,6 +72,8 @@ export class RunOrchestration extends Construct {
         runId: '{% $states.context.Execution.Name %}',
         startedAt: '{% $states.context.Execution.StartTime %}',
         input: '{% $merge([{"revision": "main", "profile": "awsbatch", "run_type": "experiment", "pipeline_args": []}, $states.input]) %}',
+        metrics: '{% {} %}',
+        gate: '{% {} %}',
       },
     });
 
@@ -122,7 +124,22 @@ export class RunOrchestration extends Construct {
         Key: '{% "runs/" & $runId & "/benchmark/" & $input.sample & ".metrics.json" %}',
       },
       iamResources: [bucket.arnForObjects('runs/*')],
-      outputs: '{% $parse($states.result.Body) %}',
+      assign: { metrics: '{% $parse($states.result.Body) %}' },
+      outputs: '{% {} %}',
+    });
+
+    // gate.json exists only when the run was given a baseline (--baseline); without one this read
+    // fails and the run is recorded as a plain success.
+    const readGate = tasks.CallAwsService.jsonata(this, 'ReadGate', {
+      service: 's3',
+      action: 'getObject',
+      parameters: {
+        Bucket: bucket.bucketName,
+        Key: '{% "runs/" & $runId & "/benchmark/" & $input.sample & ".gate.json" %}',
+      },
+      iamResources: [bucket.arnForObjects('runs/*')],
+      assign: { gate: '{% $parse($states.result.Body) %}' },
+      outputs: '{% {} %}',
     });
 
     const recordSucceeded = tasks.DynamoUpdateItem.jsonata(this, 'RecordSucceeded', {
@@ -134,14 +151,37 @@ export class RunOrchestration extends Construct {
       expressionAttributeValues: {
         ':status': S.fromString('SUCCEEDED'),
         ':finished': S.fromString('{% $now() %}'),
-        ':commit': S.fromString('{% $states.input.run.head_commit ? $states.input.run.head_commit : "unknown" %}'),
-        ':params': S.fromString('{% $states.input.params_hash %}'),
-        ':snp': S.numberFromString('{% $string($states.input.metrics.snp.f1) %}'),
-        ':non_snp': S.numberFromString('{% $string($states.input.metrics.non_snp.f1) %}'),
-        ':all': S.numberFromString('{% $string($states.input.metrics.all.f1) %}'),
+        ':commit': S.fromString('{% $metrics.run.head_commit ? $metrics.run.head_commit : "unknown" %}'),
+        ':params': S.fromString('{% $metrics.params_hash %}'),
+        ':snp': S.numberFromString('{% $string($metrics.metrics.snp.f1) %}'),
+        ':non_snp': S.numberFromString('{% $string($metrics.metrics.non_snp.f1) %}'),
+        ':all': S.numberFromString('{% $string($metrics.metrics.all.f1) %}'),
         ':uri': S.fromString(`{% "s3://${bucket.bucketName}/runs/" & $runId & "/benchmark/" & $input.sample & ".metrics.json" %}`),
       },
       assign: { status: 'SUCCEEDED' },
+    });
+
+    // A gated run: PASS records SUCCEEDED; a regression or an incomparable run records that status.
+    const recordGated = tasks.DynamoUpdateItem.jsonata(this, 'RecordGated', {
+      table: this.table,
+      key,
+      updateExpression: 'SET #status = :status, finished_at = :finished, head_commit = :commit, ' +
+        'params_hash = :params, snp_f1 = :snp, non_snp_f1 = :non_snp, all_f1 = :all, metrics_uri = :uri, ' +
+        'gate_status = :gate, gate_reasons = :reasons',
+      expressionAttributeNames: { '#status': 'status' },
+      expressionAttributeValues: {
+        ':status': S.fromString('{% $gate.status = "PASS" ? "SUCCEEDED" : $gate.status %}'),
+        ':finished': S.fromString('{% $now() %}'),
+        ':commit': S.fromString('{% $metrics.run.head_commit ? $metrics.run.head_commit : "unknown" %}'),
+        ':params': S.fromString('{% $metrics.params_hash %}'),
+        ':snp': S.numberFromString('{% $string($metrics.metrics.snp.f1) %}'),
+        ':non_snp': S.numberFromString('{% $string($metrics.metrics.non_snp.f1) %}'),
+        ':all': S.numberFromString('{% $string($metrics.metrics.all.f1) %}'),
+        ':uri': S.fromString(`{% "s3://${bucket.bucketName}/runs/" & $runId & "/benchmark/" & $input.sample & ".metrics.json" %}`),
+        ':gate': S.fromString('{% $gate.status %}'),
+        ':reasons': S.fromString('{% $count($gate.reasons) > 0 ? $substring($join($gate.reasons, "; "), 0, 1000) : "none" %}'),
+      },
+      assign: { status: '{% $gate.status = "PASS" ? "SUCCEEDED" : $gate.status %}' },
     });
 
     // A run without a truth set has no metrics file; that is still a successful run.
@@ -177,15 +217,24 @@ export class RunOrchestration extends Construct {
       subject: '{% "nextflow-giab run " & $status %}',
       message: sfn.TaskInput.fromText(
         '{% "Run " & $runId & " (sample " & $input.sample & ", revision " & $input.revision & ", " & ' +
-        '$input.run_type & "): " & $status & ". Results: s3://.../runs/" & $runId & "/" %}'),
+        '$input.run_type & "): " & $status & ($count($gate.reasons) > 0 ? " - " & $join($gate.reasons, "; ") : "") & ' +
+        '". Results: s3://.../runs/" & $runId & "/" %}'),
     });
 
+    // A regression or an incomparable run is recorded as such, and also ends the execution as failed
+    // so a CI check (or anyone reading the execution status) sees it without opening the record.
     const done = sfn.Choice.jsonata(this, 'Done')
       .when(sfn.Condition.jsonata('{% $status = "FAILED" %}'), new sfn.Fail(this, 'RunFailed'))
+      .when(sfn.Condition.jsonata('{% $status = "REGRESSED" %}'), new sfn.Fail(this, 'RunRegressed', {
+        error: 'BenchmarkRegressed', cause: 'A score fell by more than its tolerance; see the run record.' }))
+      .when(sfn.Condition.jsonata('{% $status = "INCOMPARABLE" %}'), new sfn.Fail(this, 'RunIncomparable', {
+        error: 'BenchmarkIncomparable', cause: 'The run does not match the baseline sample, truth set, region or reference.' }))
       .otherwise(new sfn.Succeed(this, 'RunSucceeded'));
 
     runPipeline.addCatch(recordFailed, { errors: ['States.ALL'] });
     readMetrics.addCatch(recordSucceededNoMetrics, { errors: ['States.ALL'] });
+    readGate.addCatch(recordSucceeded, { errors: ['States.ALL'] });
+    recordGated.next(notify);
     recordFailed.next(notify);
     recordSucceededNoMetrics.next(notify);
     recordSucceeded.next(notify);
@@ -195,7 +244,7 @@ export class RunOrchestration extends Construct {
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
-    const definition = start.next(recordStart).next(runPipeline).next(readMetrics).next(recordSucceeded);
+    const definition = start.next(recordStart).next(runPipeline).next(readMetrics).next(readGate).next(recordGated);
 
     this.stateMachine = new sfn.StateMachine(this, 'RunStateMachine', {
       definitionBody: sfn.DefinitionBody.fromChainable(definition),
