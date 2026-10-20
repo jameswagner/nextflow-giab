@@ -33,6 +33,14 @@ scripts/run-on-aws.sh -n my-run -p awsbatch -- --samplesheet s3://<BucketName>/s
 
 Inputs must be S3 paths. `-r` picks the branch or tag of this repo to run, and the log goes to the `/giab/batch-jobs` log group.
 
+### Recorded runs
+
+`scripts/start-run.sh` starts the same thing through a Step Functions state machine that also keeps a run record in DynamoDB: it records the run as `RUNNING`, runs the launcher job and waits, reads the benchmark metrics if the run had a truth set, records `SUCCEEDED` or `FAILED` with the headline scores, and publishes to the alert topic. Results go to `s3://<BucketName>/runs/<run id>/`.
+
+```bash
+scripts/start-run.sh -s HG002 -r main -p awsbatch,chr20 -- --samplesheet s3://... --truth_vcf s3://... ...
+```
+
 Nothing account-specific is committed; the queue, role and bucket come from the stack outputs. `smoke/faidx.nf` is a one-step Batch smoke test, and `smoke/fail.nf` fails on purpose to check the alarms. `cdk destroy` removes everything, including the bucket contents.
 
 ## Validation: GIAB HG002, chr20
