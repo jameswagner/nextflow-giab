@@ -32,3 +32,20 @@ process BENCHMARK_METRICS {
         ${containers}
     """
 }
+
+// Compare the metrics record with a committed baseline (benchmarks/*.json) and write gate.json:
+// PASS, REGRESSED (a score fell by more than its tolerance) or INCOMPARABLE (different sample,
+// truth set, region or reference). The result is data, so a regression still publishes it.
+process BENCHMARK_GATE {
+    input:
+    tuple val(sample), path(metrics_json)
+    path baseline
+
+    output:
+    tuple val(sample), path("${sample}.gate.json")
+
+    script:
+    """
+    benchmark_gate.py --metrics ${metrics_json} --baseline ${baseline} --output ${sample}.gate.json
+    """
+}

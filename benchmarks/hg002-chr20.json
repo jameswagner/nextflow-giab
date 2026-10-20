@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0.0",
+  "description": "Expected benchmark scores for this sample, truth set and region. Changing this file is a deliberate, reviewed act: runs never update it.",
+  "sample": "HG002",
+  "truth_set": "GIAB HG002 NISTv4.2.1 GRCh38",
+  "truth_vcf": "HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz",
+  "truth_bed": "HG002_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed",
+  "reference": "chr20.fasta",
+  "region": "chr20",
+  "recorded_from": {
+    "pipeline_commit": "f2937aa91103a55bf12a27aab278f2e0354ddce7",
+    "revision": "metrics-contract",
+    "benchmark_tool": "rtg vcfeval 3.13",
+    "params_hash": "sha256:51c450f3eb91d60ddf4cf89ff63bca680fe7b5fc8d9e1c7d3b87fb2ad79869cb"
+  },
+  "scores": {
+    "snp": {
+      "precision": 0.9938807235726399,
+      "recall": 0.9858971303604223,
+      "f1": 0.9898728297664207
+    },
+    "non_snp": {
+      "precision": 0.9666824420255561,
+      "recall": 0.9072494669509595,
+      "f1": 0.9360234766668126
+    },
+    "all": {
+      "precision": 0.9903473716569321,
+      "recall": 0.9751782925086876,
+      "f1": 0.9827042978783471
+    }
+  },
+  "tolerances": {
+    "max_drop": {
+      "precision": 0.002,
+      "recall": 0.002,
+      "f1": 0.002
+    }
+  }
+}
