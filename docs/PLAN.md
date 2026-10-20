@@ -25,6 +25,9 @@ Tick items off as they finish. Record decisions and surprises in the Notes secti
   - [x] Full pipeline on Batch with the toy data
 - [x] CloudWatch: log retention, metric filter for GATK ERROR lines, alarm on failed jobs
 - [x] `cdk destroy` and redeploy test (proves the infra is reproducible)
+- [ ] Pure AWS: Nextflow itself on AWS, not on a laptop
+  - [ ] Launcher: Nextflow as a Batch (Fargate) job in CDK, plus `scripts/run-on-aws.sh` to kick it off from the CLI
+  - [ ] Later: S3 upload trigger (EventBridge starts the launcher job when a `run.json` lands in `incoming/`); guardrails: exact prefix and suffix, results kept out of that prefix, tolerate duplicate events
 - [ ] Validation on real data
   - [x] chr20 reference and reads, GIAB truth VCF + high-confidence BED (inputs gathered and uploaded; see notes)
   - [ ] RTG vcfeval precision/recall (SNP and indel), metrics.json

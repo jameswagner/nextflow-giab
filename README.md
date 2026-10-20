@@ -23,6 +23,16 @@ nextflow run main.nf -profile awsbatch \
   --dbsnp ... --dbsnp_tbi ... --mills ... --mills_tbi ...
 ```
 
+### Or start it from the CLI, with Nextflow running on AWS too
+
+`scripts/run-on-aws.sh` submits a Batch (Fargate) job that runs Nextflow itself, so your machine is not involved once it is submitted:
+
+```bash
+scripts/run-on-aws.sh -n my-run -p awsbatch -- --samplesheet s3://<BucketName>/samplesheet.csv --fasta s3://... --dbsnp ...
+```
+
+Inputs must be S3 paths. `-r` picks the branch or tag of this repo to run, and the log goes to the `/giab/batch-jobs` log group.
+
 Nothing account-specific is committed; the queue, role and bucket come from the stack outputs. `smoke/faidx.nf` is a one-step Batch smoke test, and `smoke/fail.nf` fails on purpose to check the alarms. `cdk destroy` removes everything, including the bucket contents.
 
 ## Toy data caveat
