@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib/core';
 import { InfraStack } from '../lib/infra-stack';
+import { GithubIdentityStack } from '../lib/github-identity-stack';
 
 const app = new cdk.App();
 new InfraStack(app, 'InfraStack', {
@@ -17,4 +18,13 @@ new InfraStack(app, 'InfraStack', {
   // env: { account: '123456789012', region: 'us-east-1' },
 
   /* For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html */
+});
+
+// Roles for GitHub Actions (OIDC, no stored keys). Separate from InfraStack so rebuilding the
+// infrastructure never deletes the roles that deploy it. Deploy by hand: `cdk deploy GithubIdentityStack`.
+new GithubIdentityStack(app, 'GithubIdentityStack', {
+  env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
+  repo: app.node.tryGetContext('githubRepo') ?? 'jameswagner/nextflow-giab',
+  // An account can have only one GitHub OIDC provider; pass -c createOidcProvider=true if it has none.
+  createOidcProvider: app.node.tryGetContext('createOidcProvider') === 'true',
 });
