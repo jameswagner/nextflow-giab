@@ -14,11 +14,13 @@ process BENCHMARK_METRICS {
     val truth_bed
     val reference
     val region
+    val analysis_params   // map of settings that can change the scores; hashed into the record
 
     output:
     tuple val(sample), path("${sample}.metrics.json")
 
     script:
+    def analysis = analysis_params.collect { name, value -> "--param '${name}=${value}'" }.join(' ')
     def containers = run_meta.containers.collect { name, image -> "--container '${name}=${image}'" }.join(' ')
     """
     benchmark_metrics.py \\
@@ -28,7 +30,7 @@ process BENCHMARK_METRICS {
         ${opt('--repository', run_meta.repository)} ${opt('--revision', run_meta.revision)} ${opt('--head-commit', run_meta.head_commit)} \\
         ${opt('--nextflow-version', run_meta.nextflow_version)} ${opt('--truth-set', run_meta.truth_set)} \\
         --truth-vcf ${truth_vcf} --truth-bed ${truth_bed} --reference ${reference} ${opt('--region', region)} \\
-        --param eval_region=${region ?: ''} \\
+        ${analysis} \\
         ${containers}
     """
 }

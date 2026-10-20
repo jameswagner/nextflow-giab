@@ -21,14 +21,27 @@ params {
     truth_set:     String? // label for the record, e.g. 'GIAB HG002 NISTv4.2.1 GRCh38'
     baseline:      String? // optional: committed baseline to gate against, e.g. benchmarks/hg002-chr20.json
 
+    // GATK hard filters (a record is filtered if the expression is true). Defaults are the
+    // pipeline's standard thresholds; changing them is an experiment and is recorded in the benchmark.
+    snp_filter:    String = 'QD < 2.0 || QUAL < 30.0 || SOR > 3.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0'
+    indel_filter:  String = 'QD < 2.0 || QUAL < 30.0 || FS > 200.0 || ReadPosRankSum < -20.0'
+
     // Recorded in the benchmark metrics; set by whatever starts the run (CLI, PR check, merge).
     run_type:      String = 'experiment'  // main | pr | experiment
     pr_number:     Integer?
     base_commit:   String?                // for PR runs, the commit being compared against
 }
 
+// The filter expressions end up inside a shell command, so allow only what a filter needs.
+def checkFilter(String name, String expression) {
+    if( !(expression ==~ /[A-Za-z0-9_ .<>=!&|()+\-]+/) )
+        error "--${name} may only contain letters, digits, spaces and . < > = ! & | ( ) + - _ : got '${expression}'"
+}
+
 workflow {
     main:
+    checkFilter('snp_filter', params.snp_filter)
+    checkFilter('indel_filter', params.indel_filter)
 
     // --- inputs ---
     // One tuple per sample: (sample_id, [fastq_1, fastq_2]). Everything downstream
@@ -71,7 +84,8 @@ workflow {
     // --- call and filter variants ---
     GATK_HAPLOTYPECALLER(GATK_APPLYBQSR.out, fasta, SAMTOOLS_FAIDX.out, GATK_DICT.out)
     GATK_GENOTYPEGVCFS(GATK_HAPLOTYPECALLER.out, fasta, SAMTOOLS_FAIDX.out, GATK_DICT.out)
-    GATK_HARDFILTER(GATK_GENOTYPEGVCFS.out, fasta, SAMTOOLS_FAIDX.out, GATK_DICT.out)
+    GATK_HARDFILTER(GATK_GENOTYPEGVCFS.out, fasta, SAMTOOLS_FAIDX.out, GATK_DICT.out,
+                    params.snp_filter, params.indel_filter)
 
     // --- score against a truth set, if one was given ---
     benchmark = channel.empty()
@@ -90,7 +104,8 @@ workflow {
         ]
         BENCHMARK_METRICS(
             RTG_VCFEVAL.out, run_meta,
-            params.truth_vcf.name, params.truth_bed.name, params.fasta.name, params.eval_region)
+            params.truth_vcf.name, params.truth_bed.name, params.fasta.name, params.eval_region,
+            [eval_region: params.eval_region ?: '', snp_filter: params.snp_filter, indel_filter: params.indel_filter])
         benchmark = RTG_VCFEVAL.out.mix(BENCHMARK_METRICS.out)
 
         // A relative baseline path is relative to the pipeline's own checkout, not the launch directory.

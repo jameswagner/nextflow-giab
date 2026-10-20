@@ -66,6 +66,15 @@ class BenchmarkMetricsTest(unittest.TestCase):
         self.run_tool("--param", "eval_region=chr21")
         self.assertNotEqual(json.loads(self.out.read_text())["params_hash"], first)
 
+    def test_filter_expressions_are_recorded_and_change_the_hash(self):
+        strict = "snp_filter=QD < 25.0 || QUAL < 30.0"
+        self.assertEqual(self.run_tool("--param", strict), 0)
+        record = json.loads(self.out.read_text())
+        self.assertEqual(record["params"]["snp_filter"], "QD < 25.0 || QUAL < 30.0")
+        strict_hash = record["params_hash"]
+        self.run_tool("--param", "snp_filter=QD < 2.0 || QUAL < 30.0")
+        self.assertNotEqual(json.loads(self.out.read_text())["params_hash"], strict_hash)
+
     def test_fails_when_rows_do_not_add_up(self):
         summary = self.vcfeval / "summary.txt"
         summary.write_text(summary.read_text().replace("80539", "80540", 1))
