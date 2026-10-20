@@ -26,11 +26,12 @@ Tick items off as they finish. Record decisions and surprises in the Notes secti
 - [x] CloudWatch: log retention, metric filter for GATK ERROR lines, alarm on failed jobs
 - [x] `cdk destroy` and redeploy test (proves the infra is reproducible)
 - [ ] Pure AWS: Nextflow itself on AWS, not on a laptop
-  - [ ] Launcher: Nextflow as a Batch (Fargate) job in CDK, plus `scripts/run-on-aws.sh` to kick it off from the CLI
-  - [ ] Later: S3 upload trigger (EventBridge starts the launcher job when a `run.json` lands in `incoming/`); guardrails: exact prefix and suffix, results kept out of that prefix, tolerate duplicate events
+  - [x] Launcher: Nextflow as a Batch (Fargate) job in CDK, plus `scripts/run-on-aws.sh` to kick it off from the CLI
+  - [ ] Run record plus gate: one DynamoDB item per run (run id, sample, pipeline revision, parameters and hash, input checksums, status, times, result locations, metrics). Key on sample with time as sort key, plus an index on revision for comparing versions. Samples with a truth set (GIAB) are gated against the previous good run's scores, or a committed baseline such as `benchmarks/hg002-chr20.json` with a tolerance; samples without one get generic QC gates only (coverage, duplicate rate, alignment rate). Step Functions can orchestrate: record, run the launcher job and wait, gate, update the record, notify via the existing SNS topic.
+  - [ ] Later: trigger on a new tag or merge to `main`, or on a schedule, or by S3 upload of a run file. Never trigger from pull requests from forks (public repo, AWS spend). Add an email subscriber to the alert topic.
 - [ ] Validation on real data
   - [x] chr20 reference and reads, GIAB truth VCF + high-confidence BED (inputs gathered and uploaded; see notes)
-  - [ ] RTG vcfeval precision/recall (SNP and indel), metrics.json
+  - [x] RTG vcfeval precision/recall (SNP and indel), metrics.json
   - [ ] Optional: VEP/ClinVar/gnomAD annotation, labeled a research demo
 - [ ] README final pass, architecture diagram, demo video (3-5 min)
 
@@ -61,3 +62,6 @@ S3 Files vs EBS comparison, Athena over results, a small web UI, Firehose, Healt
 - Validation reads: chr20 sliced remotely (via the BAM index, ~2.7 GB) from GIAB's `NIST_Illumina_2x250bps/novoalign_bams/HG002.GRCh38.2x250.bam`, mean depth 68.9x, downsampled with `samtools view -s 42.435` to ~30x and converted to FASTQ (3,967,918 pairs, 249 bp reads). Caveat: this library was designed for DISCOVAR assembly (overlapping 2x250, ~350 bp inserts), not standard 2x150 calling, so scores may differ from published ones.
 - Validation reference/known-sites: UCSC hg38 `chr20.fa.gz`, upper-cased (length 64,444,167, matches the BAM header); dbSNP138 and Mills_and_1000G sliced to chr20 from the GATK public bundle (`gcp-public-data--broad-references/hg38/v0/`). Unverified: whether GATK accepts the sliced known-sites headers (they list all contigs) against a chr20-only reference.
 - Scorer: switched from hap.py to RTG `vcfeval` (rtg-tools 3.13, `quay.io/biocontainers/rtg-tools:3.13--hdfd78af_0`). The hap.py biocontainer (0.3.15, Python 2.7, last built 2023) has no vcfeval engine. Optional later: genome-stratifications from `release/genome-stratifications` for per-region breakdowns. vcfdist (2.6.4) is a possible second opinion.
+- HG002 chr20 (~30x) result, run through the cloud launcher (Nextflow inside AWS), 57 min, 14 jobs, all passed: SNP precision 0.9939 / recall 0.9859 / F1 0.9899 (TP 70,327, FP 433, FN 1,006); non-SNP (indels etc.) 0.9667 / 0.9072 / 0.9360 (TP 10,212, FP 352, FN 1,044); all 0.9903 / 0.9752 / 0.9827. Per-type rows are the last row of `snp_roc` and `non_snp_roc`; they sum exactly to the "None" row of `summary.txt`. Caveats: one sample, one chromosome, conservative `_noinconsistent` BED, 27% of calls (30,260 of 111,585) outside the scored regions, at least one region (chr20:38,708,346-38,708,411) skipped by vcfeval as too complex, library designed for assembly. Not compared with published figures. Indels are the weak spot (recall 0.907).
+- `metrics.json` is built inside `RTG_VCFEVAL` from vcfeval's own files (tested locally through Nextflow against the real output). The sliced known-sites headers, the chr20 memory settings and the Batch disk all held up: no step failed, ran out of memory or ran out of disk. Spot retry (`maxSpotAttempts`) is in PR 6; no Spot interruption occurred so it is untested.
+
