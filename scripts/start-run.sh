@@ -51,4 +51,5 @@ exec_arn=$(aws stepfunctions start-execution --state-machine-arn "$arn" --name "
   --query executionArn --output text)
 echo "Started run $name. Nothing runs on this machine; it can be closed."
 echo "Status:  aws stepfunctions describe-execution --execution-arn $exec_arn --query status"
-echo "Record:  aws dynamodb query --table-name <RunsTableName> --key-condition-expression 'sample = :s' --expression-attribute-values '{\":s\":{\"S\":\"$sample\"}}'"
+# "sample" is a DynamoDB reserved word, hence the #s placeholder.
+echo "Record:  aws dynamodb query --table-name <RunsTableName> --key-condition-expression '#s = :s' --expression-attribute-names '{\"#s\":\"sample\"}' --expression-attribute-values '{\":s\":{\"S\":\"$sample\"}}'"
