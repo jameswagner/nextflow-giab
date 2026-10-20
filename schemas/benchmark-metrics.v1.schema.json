@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jameswagner/nextflow-giab/schemas/benchmark-metrics.v1.schema.json",
+  "title": "Benchmark metrics record, v1",
+  "description": "One per benchmarked sample per run, written by bin/benchmark_metrics.py from RTG vcfeval output. Holds no bucket names, ARNs or account IDs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_at", "sample", "run", "containers", "benchmark", "params", "params_hash", "metrics"],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^1\\.\\d+\\.\\d+$" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "sample": { "type": "string", "minLength": 1 },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_type", "run_name", "session_id", "started_at", "repository", "revision", "head_commit", "base_commit", "pr_number", "nextflow_version"],
+      "properties": {
+        "run_type": { "enum": ["main", "pr", "experiment"] },
+        "run_name": { "type": ["string", "null"] },
+        "session_id": { "type": ["string", "null"] },
+        "started_at": { "type": ["string", "null"] },
+        "repository": { "type": ["string", "null"] },
+        "revision": { "type": ["string", "null"], "description": "Branch or tag the pipeline was run at" },
+        "head_commit": { "type": ["string", "null"], "description": "Commit the pipeline was run at" },
+        "base_commit": { "type": ["string", "null"], "description": "For PR runs, the commit being compared against" },
+        "pr_number": { "type": ["integer", "null"], "minimum": 1 },
+        "nextflow_version": { "type": ["string", "null"] }
+      }
+    },
+    "containers": {
+      "type": "object",
+      "description": "Process name to container image",
+      "additionalProperties": { "type": "string" }
+    },
+    "benchmark": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "tool_version", "score_field", "truth_set", "truth_vcf", "truth_bed", "reference", "region"],
+      "properties": {
+        "tool": { "const": "rtg vcfeval" },
+        "tool_version": { "type": ["string", "null"] },
+        "score_field": { "type": ["string", "null"] },
+        "truth_set": { "type": ["string", "null"] },
+        "truth_vcf": { "type": "string" },
+        "truth_bed": { "type": "string" },
+        "reference": { "type": "string" },
+        "region": { "type": ["string", "null"] }
+      }
+    },
+    "params": {
+      "type": "object",
+      "description": "Analysis parameters that can change results; hashed into params_hash",
+      "additionalProperties": { "type": "string" }
+    },
+    "params_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snp", "non_snp", "all"],
+      "properties": {
+        "snp": { "$ref": "#/$defs/scores" },
+        "non_snp": { "$ref": "#/$defs/scores" },
+        "all": { "$ref": "#/$defs/scores" }
+      }
+    }
+  },
+  "$defs": {
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["true_positives_baseline", "true_positives_call", "false_positives", "false_negatives", "precision", "recall", "f1"],
+      "properties": {
+        "true_positives_baseline": { "type": "integer", "minimum": 0 },
+        "true_positives_call": { "type": "integer", "minimum": 0 },
+        "false_positives": { "type": "integer", "minimum": 0 },
+        "false_negatives": { "type": "integer", "minimum": 0 },
+        "precision": { "type": "number", "minimum": 0, "maximum": 1 },
+        "recall": { "type": "number", "minimum": 0, "maximum": 1 },
+        "f1": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}

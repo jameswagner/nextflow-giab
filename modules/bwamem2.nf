@@ -1,6 +1,4 @@
 process BWAMEM2_INDEX {
-    container 'quay.io/biocontainers/bwa-mem2:2.3--he70b90d_0'
-
     input:
     path fasta
 
@@ -15,8 +13,6 @@ process BWAMEM2_INDEX {
 }
 
 process BWAMEM2_MEM {
-    container 'quay.io/biocontainers/bwa-mem2:2.3--he70b90d_0'
-
     input:
     tuple val(sample), path(reads)
     path index
