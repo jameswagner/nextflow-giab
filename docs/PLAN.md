@@ -27,7 +27,8 @@ Tick items off as they finish. Record decisions and surprises in the Notes secti
 - [x] `cdk destroy` and redeploy test (proves the infra is reproducible)
 - [ ] Pure AWS: Nextflow itself on AWS, not on a laptop
   - [x] Launcher: Nextflow as a Batch (Fargate) job in CDK, plus `scripts/run-on-aws.sh` to kick it off from the CLI
-  - [ ] Later: S3 upload trigger (EventBridge starts the launcher job when a `run.json` lands in `incoming/`); guardrails: exact prefix and suffix, results kept out of that prefix, tolerate duplicate events
+  - [ ] Run record plus gate: one DynamoDB item per run (run id, sample, pipeline revision, parameters and hash, input checksums, status, times, result locations, metrics). Key on sample with time as sort key, plus an index on revision for comparing versions. Samples with a truth set (GIAB) are gated against the previous good run's scores, or a committed baseline such as `benchmarks/hg002-chr20.json` with a tolerance; samples without one get generic QC gates only (coverage, duplicate rate, alignment rate). Step Functions can orchestrate: record, run the launcher job and wait, gate, update the record, notify via the existing SNS topic.
+  - [ ] Later: trigger on a new tag or merge to `main`, or on a schedule, or by S3 upload of a run file. Never trigger from pull requests from forks (public repo, AWS spend). Add an email subscriber to the alert topic.
 - [ ] Validation on real data
   - [x] chr20 reference and reads, GIAB truth VCF + high-confidence BED (inputs gathered and uploaded; see notes)
   - [x] RTG vcfeval precision/recall (SNP and indel), metrics.json
