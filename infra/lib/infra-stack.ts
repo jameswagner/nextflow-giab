@@ -179,13 +179,18 @@ export class InfraStack extends cdk.Stack {
     });
     bucket.grantReadWrite(launcherRole);
     jobRole.grantPassRole(launcherRole);
+    const nextflowJobDefinitions =
+      `arn:${this.partition}:batch:${this.region}:${this.account}:job-definition/nf-*`;
+    // Nextflow tags each job definition it registers (one per container image).
     launcherRole.addToPolicy(new iam.PolicyStatement({
-      // TagResource: Nextflow tags each job definition it registers (one per container image).
-      actions: ['batch:SubmitJob', 'batch:TagResource'],
+      actions: ['batch:TagResource'],
+      resources: [nextflowJobDefinitions],
+    }));
+    launcherRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['batch:SubmitJob'],
       resources: [
         jobQueue.jobQueueArn,
-        // Nextflow registers its job definitions under names starting "nf-".
-        `arn:${this.partition}:batch:${this.region}:${this.account}:job-definition/nf-*`,
+        nextflowJobDefinitions, // Nextflow registers its job definitions under names starting "nf-".
       ],
     }));
     launcherRole.addToPolicy(new iam.PolicyStatement({
