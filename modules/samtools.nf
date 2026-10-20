@@ -1,6 +1,4 @@
 process SAMTOOLS_FAIDX {
-    container 'quay.io/biocontainers/samtools:1.24--h9dcdb79_1'
-
     input:
     path fasta
 
@@ -12,8 +10,6 @@ process SAMTOOLS_FAIDX {
 }
 
 process SAMTOOLS_SORT {
-    container 'quay.io/biocontainers/samtools:1.24--h9dcdb79_1'
-
     input:
     tuple val(sample), path(sam)
 
@@ -28,8 +24,6 @@ process SAMTOOLS_SORT {
 }
 
 process SAMTOOLS_FLAGSTAT {
-    container 'quay.io/biocontainers/samtools:1.24--h9dcdb79_1'
-
     input:
     tuple val(sample), path(bam), path(bai)
 

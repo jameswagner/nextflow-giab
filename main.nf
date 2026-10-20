@@ -1,6 +1,7 @@
 include { SAMTOOLS_FAIDX; SAMTOOLS_SORT; SAMTOOLS_FLAGSTAT } from './modules/samtools.nf'
 include { BWAMEM2_INDEX; BWAMEM2_MEM } from './modules/bwamem2.nf'
 include { RTG_FORMAT; RTG_VCFEVAL } from './modules/rtg.nf'
+include { BENCHMARK_METRICS } from './modules/benchmark.nf'
 include { GATK_DICT; GATK_MARKDUPLICATES; GATK_BASERECALIBRATOR; GATK_APPLYBQSR;
           GATK_HAPLOTYPECALLER; GATK_GENOTYPEGVCFS; GATK_HARDFILTER } from './modules/gatk.nf'
 
@@ -17,6 +18,12 @@ params {
     truth_vcf_tbi: Path?
     truth_bed:     Path?   // high-confidence regions
     eval_region:   String? // e.g. chr20
+    truth_set:     String? // label for the record, e.g. 'GIAB HG002 NISTv4.2.1 GRCh38'
+
+    // Recorded in the benchmark metrics; set by whatever starts the run (CLI, PR check, merge).
+    run_type:      String = 'experiment'  // main | pr | experiment
+    pr_number:     Integer?
+    base_commit:   String?                // for PR runs, the commit being compared against
 }
 
 workflow {
@@ -72,7 +79,18 @@ workflow {
         RTG_VCFEVAL(
             GATK_HARDFILTER.out, RTG_FORMAT.out,
             params.truth_vcf, params.truth_vcf_tbi, params.truth_bed, params.eval_region)
-        benchmark = RTG_VCFEVAL.out
+
+        run_meta = [
+            run_type: params.run_type, pr_number: params.pr_number, base_commit: params.base_commit,
+            run_name: workflow.runName, session_id: workflow.sessionId, started_at: workflow.start,
+            repository: workflow.repository, revision: workflow.revision, head_commit: workflow.commitId,
+            nextflow_version: nextflow.version, truth_set: params.truth_set,
+            containers: workflow.container instanceof Map ? workflow.container : [:]
+        ]
+        BENCHMARK_METRICS(
+            RTG_VCFEVAL.out, run_meta,
+            params.truth_vcf.name, params.truth_bed.name, params.fasta.name, params.eval_region)
+        benchmark = RTG_VCFEVAL.out.mix(BENCHMARK_METRICS.out)
     }
 
     publish:

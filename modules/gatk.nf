@@ -1,6 +1,4 @@
 process GATK_DICT {
-    container 'quay.io/biocontainers/gatk4:4.6.2.0--py310hdfd78af_1'
-
     input:
     path fasta
 
@@ -14,8 +12,6 @@ process GATK_DICT {
 }
 
 process GATK_MARKDUPLICATES {
-    container 'quay.io/biocontainers/gatk4:4.6.2.0--py310hdfd78af_1'
-
     input:
     tuple val(sample), path(bam), path(bai)
 
@@ -34,8 +30,6 @@ process GATK_MARKDUPLICATES {
 }
 
 process GATK_BASERECALIBRATOR {
-    container 'quay.io/biocontainers/gatk4:4.6.2.0--py310hdfd78af_1'
-
     input:
     tuple val(sample), path(bam), path(bai)
     path fasta
@@ -61,8 +55,6 @@ process GATK_BASERECALIBRATOR {
 }
 
 process GATK_APPLYBQSR {
-    container 'quay.io/biocontainers/gatk4:4.6.2.0--py310hdfd78af_1'
-
     input:
     tuple val(sample), path(bam), path(bai), path(table)
     path fasta
@@ -83,8 +75,6 @@ process GATK_APPLYBQSR {
 }
 
 process GATK_HAPLOTYPECALLER {
-    container 'quay.io/biocontainers/gatk4:4.6.2.0--py310hdfd78af_1'
-
     input:
     tuple val(sample), path(bam), path(bai)
     path fasta
@@ -105,8 +95,6 @@ process GATK_HAPLOTYPECALLER {
 }
 
 process GATK_GENOTYPEGVCFS {
-    container 'quay.io/biocontainers/gatk4:4.6.2.0--py310hdfd78af_1'
-
     input:
     tuple val(sample), path(gvcf), path(gvcf_tbi)
     path fasta
@@ -126,7 +114,6 @@ process GATK_GENOTYPEGVCFS {
 }
 
 process GATK_HARDFILTER {
-    container 'quay.io/biocontainers/gatk4:4.6.2.0--py310hdfd78af_1'
     input:
     tuple val(sample), path(vcf), path(tbi)
     path fasta

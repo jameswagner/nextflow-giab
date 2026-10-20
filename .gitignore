@@ -8,3 +8,7 @@ test-data/
 
 # Working plan, kept locally only
 docs/PLAN.md
+
+# Python bytecode
+__pycache__/
+*.pyc
