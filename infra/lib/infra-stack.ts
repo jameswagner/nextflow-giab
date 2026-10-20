@@ -3,6 +3,7 @@ import * as batch from 'aws-cdk-lib/aws-batch';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cwActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
@@ -155,8 +156,76 @@ export class InfraStack extends cdk.Stack {
       alarm.addAlarmAction(new cwActions.SnsAction(alertTopic));
     }
 
+    // --- Nextflow launcher ---
+    // Nextflow itself runs here, as a Batch job on Fargate (no instances to manage), instead of on
+    // a laptop. It submits the real work to the Spot queue above. Deliberately not Spot: if the
+    // process coordinating a run is reclaimed, the whole run stops.
+    const launcherEnv = new batch.FargateComputeEnvironment(this, 'LauncherEnv', {
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      securityGroups: [computeSg],
+      maxvCpus: 4,
+    });
+    const launcherQueue = new batch.JobQueue(this, 'LauncherQueue', {
+      computeEnvironments: [{ computeEnvironment: launcherEnv, order: 1 }],
+    });
+
+    // What Nextflow needs from AWS to drive Batch: register job definitions, submit and watch jobs
+    // on the worker queue, hand the worker job role to them, and read/write the bucket.
+    const launcherRole = new iam.Role(this, 'LauncherRole', {
+      assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+      description: 'Nextflow launcher: submit and watch Batch jobs, read/write the pipeline bucket',
+    });
+    bucket.grantReadWrite(launcherRole);
+    jobRole.grantPassRole(launcherRole);
+    launcherRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['batch:SubmitJob'],
+      resources: [
+        jobQueue.jobQueueArn,
+        // Nextflow registers its job definitions under names starting "nf-".
+        `arn:${this.partition}:batch:${this.region}:${this.account}:job-definition/nf-*`,
+      ],
+    }));
+    launcherRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        'batch:DescribeJobs',
+        'batch:ListJobs',
+        'batch:TerminateJob',
+        'batch:RegisterJobDefinition',
+        'batch:DeregisterJobDefinition',
+        'batch:DescribeJobDefinitions',
+        'batch:DescribeJobQueues',
+        'batch:DescribeComputeEnvironments',
+      ],
+      resources: ['*'], // these actions do not support resource-level scoping
+    }));
+
+    // The command is supplied at submit time (scripts/run-on-aws.sh); this default only
+    // prints the version. The queue and role names reach Nextflow via the same environment
+    // variables conf/awsbatch.config reads on a laptop.
+    const launcherJobDef = new batch.EcsJobDefinition(this, 'LauncherJobDef', {
+      timeout: cdk.Duration.hours(24),
+      container: new batch.EcsFargateContainerDefinition(this, 'LauncherContainer', {
+        image: ecs.ContainerImage.fromRegistry('nextflow/nextflow:26.10.1'),
+        cpu: 1,
+        memory: cdk.Size.gibibytes(2),
+        assignPublicIp: true,
+        jobRole: launcherRole,
+        logging: ecs.LogDriver.awsLogs({ logGroup: jobLogs, streamPrefix: 'nextflow-launcher' }),
+        command: ['nextflow', '-version'],
+        environment: {
+          AWS_REGION: this.region,
+          NXF_OPTS: '-Xms256m -Xmx1g',
+          GIAB_BATCH_QUEUE: jobQueue.jobQueueName,
+          GIAB_JOB_ROLE: jobRole.roleArn,
+        },
+      }),
+    });
+
     new cdk.CfnOutput(this, 'BucketName', { value: bucket.bucketName });
     new cdk.CfnOutput(this, 'JobQueueName', { value: jobQueue.jobQueueName });
     new cdk.CfnOutput(this, 'JobRoleArn', { value: jobRole.roleArn });
+    new cdk.CfnOutput(this, 'LauncherQueueName', { value: launcherQueue.jobQueueName });
+    new cdk.CfnOutput(this, 'LauncherJobDefinitionName', { value: launcherJobDef.jobDefinitionName });
   }
 }
