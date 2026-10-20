@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jameswagner/nextflow-giab/schemas/benchmark-gate.v1.schema.json",
+  "title": "Benchmark gate result, v1",
+  "description": "Written by bin/benchmark_gate.py: a metrics record compared with a committed baseline. PASS means no score fell by more than its tolerance; REGRESSED means at least one did; INCOMPARABLE means the record is for a different sample, truth set, region or reference than the baseline.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "reasons", "checks", "sample", "run", "baseline"],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^1\\.\\d+\\.\\d+$" },
+    "status": { "enum": ["PASS", "REGRESSED", "INCOMPARABLE"] },
+    "reasons": { "type": "array", "items": { "type": "string" } },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["group", "score", "baseline", "current", "delta", "max_drop", "ok"],
+        "properties": {
+          "group": { "enum": ["snp", "non_snp", "all"] },
+          "score": { "enum": ["precision", "recall", "f1"] },
+          "baseline": { "type": "number" },
+          "current": { "type": "number" },
+          "delta": { "type": "number" },
+          "max_drop": { "type": "number", "minimum": 0 },
+          "ok": { "type": "boolean" }
+        }
+      }
+    },
+    "sample": { "type": "string" },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_type", "revision", "head_commit", "base_commit", "pr_number"],
+      "properties": {
+        "run_type": { "enum": ["main", "pr", "experiment"] },
+        "revision": { "type": ["string", "null"] },
+        "head_commit": { "type": ["string", "null"] },
+        "base_commit": { "type": ["string", "null"] },
+        "pr_number": { "type": ["integer", "null"] }
+      }
+    },
+    "baseline": { "type": "object", "description": "Where the baseline numbers came from" }
+  }
+}

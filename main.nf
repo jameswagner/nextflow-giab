@@ -1,7 +1,7 @@
 include { SAMTOOLS_FAIDX; SAMTOOLS_SORT; SAMTOOLS_FLAGSTAT } from './modules/samtools.nf'
 include { BWAMEM2_INDEX; BWAMEM2_MEM } from './modules/bwamem2.nf'
 include { RTG_FORMAT; RTG_VCFEVAL } from './modules/rtg.nf'
-include { BENCHMARK_METRICS } from './modules/benchmark.nf'
+include { BENCHMARK_METRICS; BENCHMARK_GATE } from './modules/benchmark.nf'
 include { GATK_DICT; GATK_MARKDUPLICATES; GATK_BASERECALIBRATOR; GATK_APPLYBQSR;
           GATK_HAPLOTYPECALLER; GATK_GENOTYPEGVCFS; GATK_HARDFILTER } from './modules/gatk.nf'
 
@@ -19,6 +19,7 @@ params {
     truth_bed:     Path?   // high-confidence regions
     eval_region:   String? // e.g. chr20
     truth_set:     String? // label for the record, e.g. 'GIAB HG002 NISTv4.2.1 GRCh38'
+    baseline:      String? // optional: committed baseline to gate against, e.g. benchmarks/hg002-chr20.json
 
     // Recorded in the benchmark metrics; set by whatever starts the run (CLI, PR check, merge).
     run_type:      String = 'experiment'  // main | pr | experiment
@@ -91,6 +92,14 @@ workflow {
             RTG_VCFEVAL.out, run_meta,
             params.truth_vcf.name, params.truth_bed.name, params.fasta.name, params.eval_region)
         benchmark = RTG_VCFEVAL.out.mix(BENCHMARK_METRICS.out)
+
+        // A relative baseline path is relative to the pipeline's own checkout, not the launch directory.
+        if( params.baseline ) {
+            baseline_path = params.baseline.contains('://') || params.baseline.startsWith('/')
+                ? params.baseline : "${projectDir}/${params.baseline}"
+            BENCHMARK_GATE(BENCHMARK_METRICS.out, file(baseline_path, checkIfExists: true))
+            benchmark = benchmark.mix(BENCHMARK_GATE.out)
+        }
     }
 
     publish:
