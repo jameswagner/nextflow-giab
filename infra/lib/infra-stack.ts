@@ -180,7 +180,8 @@ export class InfraStack extends cdk.Stack {
     bucket.grantReadWrite(launcherRole);
     jobRole.grantPassRole(launcherRole);
     launcherRole.addToPolicy(new iam.PolicyStatement({
-      actions: ['batch:SubmitJob'],
+      // TagResource: Nextflow tags each job definition it registers (one per container image).
+      actions: ['batch:SubmitJob', 'batch:TagResource'],
       resources: [
         jobQueue.jobQueueArn,
         // Nextflow registers its job definitions under names starting "nf-".
