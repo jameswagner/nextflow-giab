@@ -1,6 +1,8 @@
 import * as cdk from 'aws-cdk-lib/core';
 import * as batch from 'aws-cdk-lib/aws-batch';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
@@ -30,6 +32,7 @@ export interface RunOrchestrationProps {
 export class RunOrchestration extends Construct {
   readonly table: dynamodb.Table;
   readonly stateMachine: sfn.StateMachine;
+  readonly recordCloser: sfn.StateMachine;
 
   constructor(scope: Construct, id: string, props: RunOrchestrationProps) {
     super(scope, id);
@@ -44,6 +47,13 @@ export class RunOrchestration extends Construct {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       // Demo project: `cdk destroy` should leave nothing behind. A production table would RETAIN.
       removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+    // Finds a run's record from its execution name alone (used when an execution ends without
+    // updating its own record); the table keys are projected automatically.
+    this.table.addGlobalSecondaryIndex({
+      indexName: 'by_run_id',
+      partitionKey: { name: 'run_id', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.KEYS_ONLY,
     });
     this.table.addGlobalSecondaryIndex({
       indexName: 'by_commit',
@@ -181,6 +191,10 @@ export class RunOrchestration extends Construct {
     recordSucceeded.next(notify);
     notify.next(done);
 
+    const logGroup = new logs.LogGroup(this, 'StateMachineLogs', {
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
     const definition = start.next(recordStart).next(runPipeline).next(readMetrics).next(recordSucceeded);
 
     this.stateMachine = new sfn.StateMachine(this, 'RunStateMachine', {
@@ -188,13 +202,7 @@ export class RunOrchestration extends Construct {
       queryLanguage: sfn.QueryLanguage.JSONATA,
       timeout: cdk.Duration.hours(26), // the launcher job itself times out at 24 h
       // CDK grants the logs:*LogDelivery actions on '*' for this; AWS requires '*' for log delivery.
-      logs: {
-        destination: new logs.LogGroup(this, 'StateMachineLogs', {
-          retention: logs.RetentionDays.ONE_MONTH,
-          removalPolicy: cdk.RemovalPolicy.DESTROY,
-        }),
-        level: sfn.LogLevel.ERROR,
-      },
+      logs: { destination: logGroup, level: sfn.LogLevel.ERROR },
     });
 
     // Permissions for the raw RunPipeline state (submitJob.sync), matching what the CDK Batch task grants.
@@ -232,6 +240,68 @@ export class RunOrchestration extends Construct {
         'ForAllValues:StringEquals': { 'aws:TagKeys': [PROJECT_TAG_KEY] },
       },
     }));
+    // --- Executions that end without updating their own record ---
+    // Stopping an execution or hitting its timeout ends it on the spot: no later state runs and no
+    // error handler fires, so the record would stay RUNNING. Step Functions publishes an event for
+    // every status change; this small state machine reacts to it and closes the record. It only
+    // changes records that are still RUNNING, so a normal failure (already recorded) is left alone.
+    const indexArn = `${this.table.tableArn}/index/by_run_id`;
+    const findRecord = tasks.CallAwsService.jsonata(this, 'FindRecord', {
+      service: 'dynamodb',
+      action: 'query',
+      parameters: {
+        TableName: this.table.tableName,
+        IndexName: 'by_run_id',
+        KeyConditionExpression: 'run_id = :r',
+        ExpressionAttributeValues: { ':r': { S: '{% $states.input.detail.name %}' } },
+      },
+      iamResources: [indexArn],
+      iamAction: 'dynamodb:Query',
+      outputs: '{% $merge([$states.input, {"record": $states.result.Items[0]}]) %}',
+    });
+    const closeRecord = tasks.DynamoUpdateItem.jsonata(this, 'CloseRecord', {
+      table: this.table,
+      key: {
+        sample: S.fromString('{% $states.input.record.sample.S %}'),
+        run_key: S.fromString('{% $states.input.record.run_key.S %}'),
+      },
+      updateExpression: 'SET #status = :status, finished_at = :finished, ended_by = :by',
+      conditionExpression: '#status = :running',
+      expressionAttributeNames: { '#status': 'status' },
+      expressionAttributeValues: {
+        ':status': S.fromString('{% $states.input.detail.status %}'),
+        ':running': S.fromString('RUNNING'),
+        ':finished': S.fromString(
+          '{% $exists($states.input.detail.stopDate) ? $fromMillis($states.input.detail.stopDate) : $now() %}'),
+        ':by': S.fromString('execution status event'),
+      },
+    });
+    const nothingToClose = new sfn.Succeed(this, 'NothingToClose');
+    const closeOrSkip = sfn.Choice.jsonata(this, 'RecordFound')
+      .when(sfn.Condition.jsonata('{% $exists($states.input.record) %}'), closeRecord)
+      .otherwise(nothingToClose);
+    // A record that is no longer RUNNING (or another race) is fine: nothing to close.
+    closeRecord.addCatch(nothingToClose, { errors: ['DynamoDB.ConditionalCheckFailedException'] });
+    closeRecord.next(nothingToClose);
+    const recordCloser = this.recordCloser = new sfn.StateMachine(this, 'RecordCloser', {
+      definitionBody: sfn.DefinitionBody.fromChainable(findRecord.next(closeOrSkip)),
+      queryLanguage: sfn.QueryLanguage.JSONATA,
+      timeout: cdk.Duration.minutes(5),
+      logs: { destination: logGroup, level: sfn.LogLevel.ERROR },
+    });
+    new events.Rule(this, 'RunEndedRule', {
+      description: 'A run execution ended; close its record if it is still RUNNING',
+      eventPattern: {
+        source: ['aws.states'],
+        detailType: ['Step Functions Execution Status Change'],
+        detail: {
+          stateMachineArn: [this.stateMachine.stateMachineArn],
+          status: ['ABORTED', 'TIMED_OUT', 'FAILED'],
+        },
+      },
+      targets: [new targets.SfnStateMachine(recordCloser)],
+    });
+
     this.stateMachine.addToRolePolicy(new iam.PolicyStatement({
       actions: ['events:PutTargets', 'events:PutRule', 'events:DescribeRule'],
       resources: [`arn:${stack.partition}:events:${stack.region}:${stack.account}:rule/StepFunctionsGetEventsForBatchJobsRule`],
