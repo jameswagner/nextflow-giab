@@ -46,6 +46,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-east-1
+          mask-aws-account-id: true  # logs are public on a public repository
           role-session-name: deploy
 
       - name: Show what will change
