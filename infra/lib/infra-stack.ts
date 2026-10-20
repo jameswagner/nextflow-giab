@@ -10,6 +10,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subs from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
+import { RunOrchestration } from './run-orchestration';
 
 export class InfraStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -222,10 +223,21 @@ export class InfraStack extends cdk.Stack {
       }),
     });
 
+    // --- Run record and orchestration (see run-orchestration.ts) ---
+    const orchestration = new RunOrchestration(this, 'Orchestration', {
+      bucket,
+      launcherQueue,
+      launcherJobDefinition: launcherJobDef,
+      alertTopic,
+      pipelineRepo: this.node.tryGetContext('pipelineRepo') ?? 'jameswagner/nextflow-giab',
+    });
+
     new cdk.CfnOutput(this, 'BucketName', { value: bucket.bucketName });
     new cdk.CfnOutput(this, 'JobQueueName', { value: jobQueue.jobQueueName });
     new cdk.CfnOutput(this, 'JobRoleArn', { value: jobRole.roleArn });
     new cdk.CfnOutput(this, 'LauncherQueueName', { value: launcherQueue.jobQueueName });
     new cdk.CfnOutput(this, 'LauncherJobDefinitionName', { value: launcherJobDef.jobDefinitionName });
+    new cdk.CfnOutput(this, 'RunsTableName', { value: orchestration.table.tableName });
+    new cdk.CfnOutput(this, 'RunStateMachineArn', { value: orchestration.stateMachine.stateMachineArn });
   }
 }
