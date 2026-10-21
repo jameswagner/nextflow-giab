@@ -119,6 +119,8 @@ process GATK_HARDFILTER {
     path fasta
     path fai
     path dict
+    val snp_filter      // GATK filter expressions; validated in main.nf (safe characters only)
+    val indel_filter
 
     output:
     tuple val(sample), path("${sample}.filtered.vcf.gz"), path("${sample}.filtered.vcf.gz.tbi")
@@ -128,12 +130,12 @@ process GATK_HARDFILTER {
     gatk SelectVariants -R ${fasta} -V ${vcf} --select-type-to-include SNP -O snps.vcf.gz
     gatk VariantFiltration -R ${fasta} -V snps.vcf.gz -O snps.filtered.vcf.gz \\
         --filter-name "snp_hard" \\
-        --filter-expression "QD < 2.0 || QUAL < 30.0 || SOR > 3.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"
+        --filter-expression "${snp_filter}"
 
     gatk SelectVariants -R ${fasta} -V ${vcf} --select-type-to-include INDEL -O indels.vcf.gz
     gatk VariantFiltration -R ${fasta} -V indels.vcf.gz -O indels.filtered.vcf.gz \\
         --filter-name "indel_hard" \\
-        --filter-expression "QD < 2.0 || QUAL < 30.0 || FS > 200.0 || ReadPosRankSum < -20.0"
+        --filter-expression "${indel_filter}"
 
     gatk MergeVcfs -I snps.filtered.vcf.gz -I indels.filtered.vcf.gz -O ${sample}.filtered.vcf.gz
     """
