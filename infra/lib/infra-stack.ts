@@ -44,6 +44,13 @@ export class InfraStack extends cdk.Stack {
       ],
     });
 
+    // Flow logs for the VPC: who talked to what, kept 30 days.
+    const flowLogGroup = new logs.LogGroup(this, 'VpcFlowLogs', {
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+    vpc.addFlowLog('FlowLog', { destination: ec2.FlowLogDestination.toCloudWatchLogs(flowLogGroup) });
+
     // No inbound rules; outbound is open (image pulls, S3).
     const computeSg = new ec2.SecurityGroup(this, 'ComputeSecurityGroup', {
       vpc,
@@ -125,7 +132,7 @@ export class InfraStack extends cdk.Stack {
       defaultValue: 0,
     });
 
-    const alertTopic = new sns.Topic(this, 'AlertTopic');
+    const alertTopic = new sns.Topic(this, 'AlertTopic', { enforceSSL: true });
     // The email address is not stored in the repo: cdk deploy -c alertEmail=<address>
     const alertEmail = this.node.tryGetContext('alertEmail');
     if (alertEmail) {
