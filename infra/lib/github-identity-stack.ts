@@ -76,6 +76,21 @@ export class GithubIdentityStack extends cdk.Stack {
       resources: [arn('cloudformation', 'stack/InfraStack/*')],
     }));
 
+    // --- Benchmark history: read the run table to build the public dashboard ---
+    // Read-only: scan one table and read the stack's outputs. It can read every attribute of every run
+    // record, so scripts/export_history.py requests only an allow-list and refuses to publish anything
+    // that looks like an AWS identifier.
+    const historyRole = roleFor('HistoryRole', 'history',
+      'GitHub Actions: read the run records to publish the benchmark history', 1);
+    historyRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:Scan'],
+      resources: [arn('dynamodb', 'table/InfraStack-OrchestrationRuns*')],
+    }));
+    historyRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['cloudformation:DescribeStacks'],
+      resources: [arn('cloudformation', 'stack/InfraStack/*')],
+    }));
+
     // --- Deploys: only the CDK bootstrap roles of this project, and only after a person approves ---
     // Those roles trust the account, and CloudFormation then deploys with the bootstrap's execution role,
     // so this is effectively administrator access. What guards it is who can reach it: only a workflow
@@ -88,6 +103,7 @@ export class GithubIdentityStack extends cdk.Stack {
     }));
 
     new cdk.CfnOutput(this, 'BenchmarkRoleArn', { value: benchmarkRole.roleArn });
+    new cdk.CfnOutput(this, 'HistoryRoleArn', { value: historyRole.roleArn });
     new cdk.CfnOutput(this, 'DeployRoleArn', { value: deployRole.roleArn });
   }
 }

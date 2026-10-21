@@ -57,3 +57,18 @@ jobs:
           if [ -f execution-arn.txt ]; then
             aws stepfunctions stop-execution --execution-arn "$(cat execution-arn.txt)" --error Cancelled --cause "GitHub workflow cancelled"
           fi
+
+  publish:
+    name: Refresh the benchmark history page
+    needs: benchmark
+    if: always()  # a regression is a result worth publishing too
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write  # dispatch the publish workflow; this job has no AWS access and no other permissions
+    steps:
+      - name: Dispatch the publish workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: gh workflow run pages.yml --repo "$REPO" --ref main
