@@ -213,7 +213,7 @@ export class InfraStack extends cdk.Stack {
     const launcherJobDef = new batch.EcsJobDefinition(this, 'LauncherJobDef', {
       timeout: cdk.Duration.hours(24),
       container: new batch.EcsFargateContainerDefinition(this, 'LauncherContainer', {
-        image: ecs.ContainerImage.fromRegistry('nextflow/nextflow:26.10.1@sha256:19cb0a85d7dfa3b647fdb2326b14b911ccca7cbf4ba5b1449564b1f3b5259307'),
+        image: ecs.ContainerImage.fromRegistry('nextflow/nextflow@sha256:19cb0a85d7dfa3b647fdb2326b14b911ccca7cbf4ba5b1449564b1f3b5259307'),  // nextflow/nextflow:26.10.1
         cpu: 1,
         memory: cdk.Size.gibibytes(2),
         assignPublicIp: true,
