@@ -71,3 +71,5 @@ jobs:
           cache-dependency-path: infra/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+      - name: cdk-nag security checks
+        run: npx jest

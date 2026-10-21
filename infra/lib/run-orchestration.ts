@@ -45,6 +45,7 @@ export class RunOrchestration extends Construct {
       partitionKey: { name: 'sample', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'run_key', type: dynamodb.AttributeType.STRING }, // <started_at>#<run_id>
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       // Demo project: `cdk destroy` should leave nothing behind. A production table would RETAIN.
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
@@ -251,7 +252,8 @@ export class RunOrchestration extends Construct {
       queryLanguage: sfn.QueryLanguage.JSONATA,
       timeout: cdk.Duration.hours(26), // the launcher job itself times out at 24 h
       // CDK grants the logs:*LogDelivery actions on '*' for this; AWS requires '*' for log delivery.
-      logs: { destination: logGroup, level: sfn.LogLevel.ERROR },
+      logs: { destination: logGroup, level: sfn.LogLevel.ALL }, // no execution data: inputs are not logged
+      tracingEnabled: true,
     });
 
     // Permissions for the raw RunPipeline state (submitJob.sync), matching what the CDK Batch task grants.
@@ -336,7 +338,8 @@ export class RunOrchestration extends Construct {
       definitionBody: sfn.DefinitionBody.fromChainable(findRecord.next(closeOrSkip)),
       queryLanguage: sfn.QueryLanguage.JSONATA,
       timeout: cdk.Duration.minutes(5),
-      logs: { destination: logGroup, level: sfn.LogLevel.ERROR },
+      logs: { destination: logGroup, level: sfn.LogLevel.ALL }, // no execution data: inputs are not logged
+      tracingEnabled: true,
     });
     new events.Rule(this, 'RunEndedRule', {
       description: 'A run execution ended; close its record if it is still RUNNING',
