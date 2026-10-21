@@ -41,6 +41,22 @@ export function suppressInfraStack(stack: cdk.Stack): void {
     appliesTo: [...S3_GRANT_ACTIONS, bucketObjects],
   }]);
 
+  NagSuppressions.addResourceSuppressionsByPath(stack, at('Athena/QueryPolicy/Resource'), [
+    {
+      id: 'AwsSolutions-IAM5',
+      reason: 'Reading query data: run ids are generated per run, so the variants folders cannot be listed in ' +
+        'advance. Read access is limited to Parquet under runs/<run id>/variants/, not the rest of a run\'s output.',
+      appliesTo: [{ regex: '/^Resource::<PipelineBucket[A-Z0-9]+\\.Arn>\\/runs\\/\\*\\/variants\\/\\*$/' }],
+    },
+    {
+      id: 'AwsSolutions-IAM5',
+      reason: 'Athena writes one result object per query under athena-results/ in this bucket. The key is ' +
+        'generated per query, so the resource has to be a prefix wildcard. The workgroup fixes this location, and ' +
+        'a lifecycle rule expires the objects after 7 days.',
+      appliesTo: [{ regex: '/^Resource::<PipelineBucket[A-Z0-9]+\\.Arn>\\/athena-results\\/\\*$/' }],
+    },
+  ]);
+
   NagSuppressions.addResourceSuppressionsByPath(stack, at('LauncherRole/DefaultPolicy/Resource'), [
     {
       id: 'AwsSolutions-IAM5',
