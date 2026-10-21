@@ -4,6 +4,7 @@ include { SAMTOOLS_FAIDX; SAMTOOLS_SORT; SAMTOOLS_FLAGSTAT } from './modules/sam
 include { BWAMEM2_INDEX; BWAMEM2_MEM } from './modules/bwamem2.nf'
 include { RTG_FORMAT; RTG_VCFEVAL } from './modules/rtg.nf'
 include { BENCHMARK_METRICS; BENCHMARK_GATE } from './modules/benchmark.nf'
+include { EXPORT_VARIANTS; CONVERT_VARIANTS_PARQUET } from './modules/variants.nf'
 include { GATK_DICT; GATK_MARKDUPLICATES; GATK_BASERECALIBRATOR; GATK_APPLYBQSR;
           GATK_HAPLOTYPECALLER; GATK_GENOTYPEGVCFS; GATK_HARDFILTER } from './modules/gatk.nf'
 
@@ -91,6 +92,7 @@ workflow {
 
     // --- score against a truth set, if one was given ---
     benchmark = channel.empty()
+    variants = channel.empty()
     if( params.truth_vcf ) {
         rtg_ref = RTG_FORMAT(fasta)
         evaluated = RTG_VCFEVAL(
@@ -113,6 +115,12 @@ workflow {
             [eval_region: params.eval_region ?: '', snp_filter: params.snp_filter, indel_filter: params.indel_filter])
         benchmark = evaluated.mix(metrics_json)
 
+        // Every call and every missed truth variant as a table row (tp / fp / fn / outside).
+        scored = evaluated.map { sample, dir -> record(sample: sample, vcfeval: dir) }
+        calls = filtered.map { sample, vcf, tbi -> record(sample: sample, vcf: vcf, tbi: tbi) }
+        variants_table = EXPORT_VARIANTS(scored.join(calls, by: 'sample'), params.truth_bed)
+        variants = CONVERT_VARIANTS_PARQUET(variants_table)
+
         // A relative baseline path is relative to the pipeline's own checkout, not the launch directory.
         if( params.baseline ) {
             baseline_path = params.baseline.contains('://') || params.baseline.startsWith('/')
@@ -126,6 +134,7 @@ workflow {
     vcf       = filtered
     metrics   = dedup.metrics
     benchmark = benchmark
+    variants  = variants
 }
 
 output {
@@ -137,5 +146,8 @@ output {
     }
     benchmark {
         path 'benchmark'
+    }
+    variants {
+        path 'variants'
     }
 }
