@@ -8,7 +8,8 @@
 set -euo pipefail
 NEXTFLOW=${1:-nextflow}
 cd "$(dirname "$0")/.."
-params=$(mktemp); trap 'rm -f "$params"' EXIT
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+params="$tmp/params.json"  # Nextflow picks the parser from the extension
 # inspect only reads the script and config; these inputs need to be declared, not to exist.
 cat > "$params" <<'JSON'
 {"samplesheet": "x.csv", "fasta": "x.fa", "dbsnp": "x.vcf.gz", "dbsnp_tbi": "x.tbi", "mills": "x.vcf.gz", "mills_tbi": "x.tbi"}
@@ -18,7 +19,10 @@ status=0
 for target in "." "smoke/fail.nf"; do
   args=("$target"); [ "$target" = "." ] && args+=(-params-file "$params")
   # Nextflow prints a banner before the JSON and a status line after it; keep only the object.
-  json=$("$NEXTFLOW" inspect "${args[@]}" < /dev/null 2>/dev/null | sed -n '/^{/,/^}/p')
+  if ! raw=$("$NEXTFLOW" inspect "${args[@]}" < /dev/null 2> "$tmp/err.txt"); then
+    echo "FAIL: nextflow inspect '$target' did not run:" >&2; head -5 "$tmp/err.txt" >&2; status=1; continue
+  fi
+  json=$(echo "$raw" | sed -n '/^{/,/^}/p')
   if echo "$json" | jq -e '(.processes | length) > 0 and ([.processes[].container] | all(. != null and test("@sha256:[0-9a-f]{64}$")))' > /dev/null; then
     echo "ok: $(echo "$json" | jq '.processes | length') process(es) in '$target', all pinned by digest"
   else
