@@ -97,11 +97,14 @@ workflow {
             filtered, rtg_ref,
             params.truth_vcf, params.truth_vcf_tbi, params.truth_bed, params.eval_region)
 
+        // Everything in the record's run details is passed as text.
         run_meta = [
-            run_type: params.run_type, pr_number: params.pr_number, base_commit: params.base_commit,
-            run_name: workflow.runName, session_id: workflow.sessionId, started_at: workflow.start,
-            repository: workflow.repository, revision: workflow.revision, head_commit: workflow.commitId,
-            nextflow_version: nextflow.version, truth_set: params.truth_set
+            run_type: params.run_type,
+            pr_number: params.pr_number ? "${params.pr_number}" : '',
+            base_commit: params.base_commit ?: '',
+            run_name: "${workflow.runName}", session_id: "${workflow.sessionId}", started_at: "${workflow.start}",
+            repository: workflow.repository ?: '', revision: workflow.revision ?: '', head_commit: workflow.commitId ?: '',
+            nextflow_version: "${nextflow.version}", truth_set: params.truth_set ?: ''
         ]
         container_map = workflow.container instanceof Map ? workflow.container : [:]
         metrics_json = BENCHMARK_METRICS(
