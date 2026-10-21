@@ -206,7 +206,9 @@ export class InfraStack extends cdk.Stack {
       resources: [nextflowJobDefinitions],
       conditions: {
         StringLike: {
-          'batch:Image': ['quay.io/biocontainers/*', 'python:3.12.15-slim-bookworm*'],
+          // The Python image is pinned by digest (python@sha256:...); the tag form is kept so this can land
+          // before or after that change.
+          'batch:Image': ['quay.io/biocontainers/*', 'python:3.12.15-slim-bookworm*', 'python@sha256:*'],
         },
       },
     }));
