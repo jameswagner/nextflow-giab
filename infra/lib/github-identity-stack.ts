@@ -3,8 +3,13 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 
 export interface GithubIdentityStackProps extends cdk.StackProps {
-  /** GitHub repository allowed to assume the roles, as owner/name. */
-  readonly repo: string;
+  /**
+   * How GitHub names this repository in the tokens' `sub` claim. New repositories use immutable subjects,
+   * `owner@<owner id>/repo@<repo id>`, so a deleted and recreated repository with the same name cannot
+   * assume these roles. Read it from `gh api repos/<owner>/<repo>/actions/oidc/customization/sub`
+   * (`sub_claim_prefix`, without the leading `repo:`). Older repositories use plain `owner/repo`.
+   */
+  readonly repoSubject: string;
   /** Create the account's GitHub OIDC provider instead of using the existing one (there can be only one). */
   readonly createOidcProvider?: boolean;
 }
@@ -25,7 +30,7 @@ const OIDC_HOST = 'token.actions.githubusercontent.com';
 export class GithubIdentityStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: GithubIdentityStackProps) {
     super(scope, id, props);
-    const { repo } = props;
+    const { repoSubject } = props;
 
     const providerArn = props.createOidcProvider
       ? new iam.OpenIdConnectProvider(this, 'GithubOidc', {
@@ -41,7 +46,7 @@ export class GithubIdentityStack extends cdk.Stack {
         assumedBy: new iam.WebIdentityPrincipal(providerArn, {
           StringEquals: {
             [`${OIDC_HOST}:aud`]: 'sts.amazonaws.com',
-            [`${OIDC_HOST}:sub`]: `repo:${repo}:environment:${environment}`,
+            [`${OIDC_HOST}:sub`]: `repo:${repoSubject}:environment:${environment}`,
           },
         }),
       });

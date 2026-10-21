@@ -24,7 +24,8 @@ new InfraStack(app, 'InfraStack', {
 // infrastructure never deletes the roles that deploy it. Deploy by hand: `cdk deploy GithubIdentityStack`.
 new GithubIdentityStack(app, 'GithubIdentityStack', {
   env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
-  repo: app.node.tryGetContext('githubRepo') ?? 'jameswagner/nextflow-giab',
+  // GitHub's immutable subject for this repository (public numeric ids of the owner and the repo).
+  repoSubject: app.node.tryGetContext('githubRepoSubject') ?? 'jameswagner@6070584/nextflow-giab@1425026709',
   // An account can have only one GitHub OIDC provider; pass -c createOidcProvider=true if it has none.
   createOidcProvider: app.node.tryGetContext('createOidcProvider') === 'true',
 });
