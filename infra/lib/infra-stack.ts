@@ -223,6 +223,26 @@ export class InfraStack extends cdk.Stack {
       actions: ['batch:DeregisterJobDefinition'],
       resources: [nextflowJobDefinitions],
     }));
+    // Nextflow tags every worker job (process.resourceLabels in conf/awsbatch.config), and the launcher
+    // can cancel only jobs carrying that tag. Batch checks TagResource on the new job and also on the
+    // queue and job definition named in SubmitJob, so all three are covered; the tag value is fixed.
+    const workerTag = { key: 'project', value: 'nextflow-giab' };
+    launcherRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['batch:TerminateJob'],
+      resources: [`arn:${this.partition}:batch:${this.region}:${this.account}:job/*`],
+      conditions: { StringEquals: { [`aws:ResourceTag/${workerTag.key}`]: workerTag.value } },
+    }));
+    launcherRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['batch:TagResource'],
+      resources: [
+        `arn:${this.partition}:batch:${this.region}:${this.account}:job/*`,
+        jobQueue.jobQueueArn,
+      ],
+      conditions: {
+        'StringEquals': { [`aws:RequestTag/${workerTag.key}`]: workerTag.value },
+        'ForAllValues:StringEquals': { 'aws:TagKeys': [workerTag.key] },
+      },
+    }));
     launcherRole.addToPolicy(new iam.PolicyStatement({
       actions: ['batch:SubmitJob'],
       resources: [
@@ -234,7 +254,6 @@ export class InfraStack extends cdk.Stack {
       actions: [
         'batch:DescribeJobs',
         'batch:ListJobs',
-        'batch:TerminateJob',
         'batch:DescribeJobDefinitions',
         'batch:DescribeJobQueues',
         'batch:DescribeComputeEnvironments',
