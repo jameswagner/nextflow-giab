@@ -5,14 +5,14 @@ nextflow.enable.types = true
 //   fp       calls the truth set does not have        (vcfeval fp.vcf.gz)
 //   fn       truth variants the calls missed          (vcfeval fn.vcf.gz; only position and alleles are known)
 //   outside  calls outside the truth set's high-confidence regions, which vcfeval does not score
-// Output is a gzipped TSV with a header row. Missing values are \N, which Athena reads as NULL.
+// Output is a gzipped TSV with a header row; missing values are \N. CONVERT_VARIANTS_PARQUET turns it into Parquet.
 process EXPORT_VARIANTS {
     input:
     record(sample: String, vcfeval: Path, vcf: Path, tbi: Path)
     truth_bed: Path
 
     output:
-    file("${sample}.variants.tsv.gz")
+    tuple(sample, file("${sample}.variants.tsv.gz"))
 
     script:
     // The shell variables are escaped (\$) so Nextflow leaves them for the shell.
@@ -31,11 +31,23 @@ process EXPORT_VARIANTS {
     truth='%CHROM\\t%POS\\t%REF\\t%ALT\\t.\\t.\\t[%GT]\\t.\\t.\\t.\\t.\\t.\\t.\\t.\\n'
 
     {
-      printf 'sample\\tclass\\tchrom\\tpos\\tref\\talt\\ttype\\tqual\\tfilter\\tgenotype\\tqd\\tfs\\tsor\\tmq\\tmqranksum\\treadposranksum\\tdp\\n'
+      printf 'sample_id\\toutcome\\tchrom\\tpos\\tref\\talt\\tvariant_type\\tqual\\tfilter_status\\tgenotype\\tqd\\tfs\\tsor\\tmq\\tmq_rank_sum\\tread_pos_rank_sum\\tdp\\n'
       bcftools query -f "\$calls" ${vcfeval}/tp.vcf.gz | awk -v sample=${sample} -v class=tp "\$classify"
       bcftools query -f "\$calls" ${vcfeval}/fp.vcf.gz | awk -v sample=${sample} -v class=fp "\$classify"
       bcftools query -f "\$truth" ${vcfeval}/fn.vcf.gz | awk -v sample=${sample} -v class=fn "\$classify"
       bcftools view -f PASS -T ^${truth_bed} ${vcf} | bcftools query -f "\$calls" | awk -v sample=${sample} -v class=outside "\$classify"
     } | gzip > ${sample}.variants.tsv.gz
     """
+}
+
+// The table as Parquet: typed columns and real nulls, which is what Athena reads.
+process CONVERT_VARIANTS_PARQUET {
+    input:
+    tuple(sample: String, table: Path)
+
+    output:
+    file("${sample}.variants.parquet")
+
+    script:
+    "variants_to_parquet.py ${table} ${sample}.variants.parquet"
 }
