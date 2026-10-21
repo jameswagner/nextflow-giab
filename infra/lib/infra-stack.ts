@@ -77,6 +77,11 @@ export class InfraStack extends cdk.Stack {
     multipartUserData.addPart(ec2.MultipartBody.fromUserData(cliUserData));
     const launchTemplate = new ec2.LaunchTemplate(this, 'ComputeLaunchTemplate', {
       userData: multipartUserData,
+      // Containers are one network hop from the instance. IMDSv2 with a hop limit of 1 stops them reading
+      // the instance role's credentials from the metadata service; task containers get their S3 access
+      // from the job role through the ECS credentials endpoint instead, which is unaffected.
+      requireImdsv2: true,
+      httpPutResponseHopLimit: 1,
     });
 
     // Spot (cheap, interruptible) x86 instances. Scales to zero when idle;
@@ -112,7 +117,11 @@ export class InfraStack extends cdk.Stack {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
       description: 'Nextflow task containers: read/write the pipeline bucket',
     });
-    bucket.grantReadWrite(jobRole);
+    // Task containers read inputs from anywhere in the bucket but write only to the Nextflow work area,
+    // so a task cannot overwrite the reference, the truth set or published results.
+    bucket.grantRead(jobRole);
+    bucket.grantPut(jobRole, 'work/*');
+    bucket.grantDelete(jobRole, 'work/*');
 
     // --- Monitoring ---
     // Batch auto-creates /aws/batch/job outside CloudFormation and never expires it, so
@@ -184,13 +193,34 @@ export class InfraStack extends cdk.Stack {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
       description: 'Nextflow launcher: submit and watch Batch jobs, read/write the pipeline bucket',
     });
-    bucket.grantReadWrite(launcherRole);
+    bucket.grantRead(launcherRole);
+    for (const prefix of ['work/*', 'runs/*', 'results/*']) {
+      bucket.grantPut(launcherRole, prefix);
+    }
+    bucket.grantDelete(launcherRole, 'work/*'); // Nextflow cleans up its own work files
     jobRole.grantPassRole(launcherRole);
     const nextflowJobDefinitions =
       `arn:${this.partition}:batch:${this.region}:${this.account}:job-definition/nf-*`;
     // Nextflow tags each job definition it registers (one per container image).
     launcherRole.addToPolicy(new iam.PolicyStatement({
       actions: ['batch:TagResource'],
+      resources: [nextflowJobDefinitions],
+    }));
+    // Nextflow registers one job definition per container image. Only Nextflow's own names, and only
+    // for these images; add a pattern here when the pipeline starts using a new registry.
+    launcherRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['batch:RegisterJobDefinition'],
+      resources: [nextflowJobDefinitions],
+      conditions: {
+        StringLike: {
+          // The Python image is pinned by digest (python@sha256:...); the tag form is kept so this can land
+          // before or after that change.
+          'batch:Image': ['quay.io/biocontainers/*', 'python:3.12.15-slim-bookworm*', 'python@sha256:*'],
+        },
+      },
+    }));
+    launcherRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['batch:DeregisterJobDefinition'],
       resources: [nextflowJobDefinitions],
     }));
     launcherRole.addToPolicy(new iam.PolicyStatement({
@@ -205,8 +235,6 @@ export class InfraStack extends cdk.Stack {
         'batch:DescribeJobs',
         'batch:ListJobs',
         'batch:TerminateJob',
-        'batch:RegisterJobDefinition',
-        'batch:DeregisterJobDefinition',
         'batch:DescribeJobDefinitions',
         'batch:DescribeJobQueues',
         'batch:DescribeComputeEnvironments',
