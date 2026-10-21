@@ -11,6 +11,7 @@ import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subs from 'aws-cdk-lib/aws-sns-subscriptions';
 import { Construct } from 'constructs';
 import { RunOrchestration } from './run-orchestration';
+import { UploadTrigger } from './upload-trigger';
 import { VariantAnalytics } from './variant-analytics';
 
 export class InfraStack extends cdk.Stack {
@@ -296,6 +297,9 @@ export class InfraStack extends cdk.Stack {
 
     // --- SQL over every variant of a run (see variant-analytics.ts) ---
     new VariantAnalytics(this, 'Athena', { bucket });
+
+    // --- Uploading incoming/<sample>/samplesheet.csv starts a run (see upload-trigger.ts) ---
+    new UploadTrigger(this, 'UploadTrigger', { bucket, stateMachine: orchestration.stateMachine });
 
     new cdk.CfnOutput(this, 'BucketName', { value: bucket.bucketName });
     new cdk.CfnOutput(this, 'JobQueueName', { value: jobQueue.jobQueueName });

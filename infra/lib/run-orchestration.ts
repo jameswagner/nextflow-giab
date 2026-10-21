@@ -72,7 +72,9 @@ export class RunOrchestration extends Construct {
       assign: {
         runId: '{% $states.context.Execution.Name %}',
         startedAt: '{% $states.context.Execution.StartTime %}',
-        input: '{% $merge([{"revision": "main", "profile": "awsbatch", "run_type": "experiment", "pipeline_args": []}, $states.input]) %}',
+        // A run started by an uploaded samplesheet (see upload-trigger.ts) arrives with samplesheet_key and no
+        // sample: the sample is the folder name, and the sheet becomes the first pipeline argument.
+        input: '{% $merge([{"revision": "main", "profile": "awsbatch", "run_type": "experiment", "pipeline_args": []}, $states.input, $exists($states.input.samplesheet_key) ? {"sample": $split($states.input.samplesheet_key, "/")[1], "pipeline_args": $append(["--samplesheet", "s3://' + bucket.bucketName + '/" & $states.input.samplesheet_key], $states.input.pipeline_args)} : {}]) %}',
         metrics: '{% {} %}',
         gate: '{% {} %}',
       },
