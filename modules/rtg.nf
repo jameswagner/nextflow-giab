@@ -1,9 +1,11 @@
+nextflow.enable.types = true
+
 process RTG_FORMAT {
     input:
-    path fasta
+    fasta: Path
 
     output:
-    path "ref.sdf"
+    file("ref.sdf")
 
     script:
     "rtg format -o ref.sdf ${fasta}"
@@ -13,15 +15,15 @@ process RTG_FORMAT {
 // Records failing FILTER are excluded by vcfeval by default, which is what we want here.
 process RTG_VCFEVAL {
     input:
-    tuple val(sample), path(vcf), path(vcf_tbi)
-    path sdf
-    path truth_vcf
-    path truth_vcf_tbi
-    path truth_bed
-    val region
+    tuple(sample: String, vcf: Path, vcf_tbi: Path)
+    sdf: Path
+    truth_vcf: Path
+    truth_vcf_tbi: Path
+    truth_bed: Path
+    region: String
 
     output:
-    tuple val(sample), path("${sample}.vcfeval")
+    tuple(sample, file("${sample}.vcfeval"))
 
     script:
     """

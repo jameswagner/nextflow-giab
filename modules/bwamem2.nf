@@ -1,9 +1,11 @@
+nextflow.enable.types = true
+
 process BWAMEM2_INDEX {
     input:
-    path fasta
+    fasta: Path
 
     output:
-    path "bwamem2_index"
+    file("bwamem2_index")
 
     script:
     """
@@ -14,16 +16,16 @@ process BWAMEM2_INDEX {
 
 process BWAMEM2_MEM {
     input:
-    tuple val(sample), path(reads)
-    path index
+    tuple(sample: String, reads: List<Path>)
+    index: Path
 
     output:
-    tuple val(sample), path("${sample}.sam")
+    tuple(sample, file("${sample}.sam"))
 
     script:
     """
     bwa-mem2 mem -t ${task.cpus} \\
         -R '@RG\\tID:${sample}\\tSM:${sample}\\tPL:ILLUMINA' \\
-        ${index}/ref ${reads} > ${sample}.sam
+        ${index}/ref ${reads.join(" ")} > ${sample}.sam
     """
 }
