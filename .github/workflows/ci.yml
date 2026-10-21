@@ -51,7 +51,7 @@ jobs:
           curl -fsSL https://get.nextflow.io | bash
           ./nextflow -version
       - name: Lint pipeline and config
-        run: ./nextflow lint main.nf modules conf nextflow.config smoke
+        run: ./nextflow lint main.nf modules prep conf nextflow.config smoke
       - name: Check every container is pinned by digest
         run: scripts/check-image-pins.sh ./nextflow
 

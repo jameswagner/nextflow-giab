@@ -14,10 +14,16 @@ params="$tmp/params.json"  # Nextflow picks the parser from the extension
 cat > "$params" <<'JSON'
 {"samplesheet": "x.csv", "fasta": "x.fa", "dbsnp": "x.vcf.gz", "dbsnp_tbi": "x.tbi", "mills": "x.vcf.gz", "mills_tbi": "x.tbi"}
 JSON
+prep_params="$tmp/prep-params.json"
+cat > "$prep_params" <<'JSON'
+{"sample": "x", "giab_path": "x", "dest": "x"}
+JSON
 
 status=0
-for target in "." "smoke/fail.nf"; do
-  args=("$target"); [ "$target" = "." ] && args+=(-params-file "$params")
+for target in "." "smoke/fail.nf" "prep/giab_sample.nf"; do
+  args=("$target")
+  [ "$target" = "." ] && args+=(-params-file "$params")
+  [ "$target" = "prep/giab_sample.nf" ] && args+=(-params-file "$prep_params")
   # Nextflow prints a banner before the JSON and a status line after it; keep only the object.
   if ! raw=$("$NEXTFLOW" inspect "${args[@]}" < /dev/null 2> "$tmp/err.txt"); then
     echo "FAIL: nextflow inspect '$target' did not run:" >&2; head -5 "$tmp/err.txt" >&2; status=1; continue
