@@ -3,6 +3,10 @@ same-line comment naming the tag it came from (`// name:tag`).
 
 A tag can be re-pointed at different contents; a digest cannot. This fails if a new image is added
 without a digest, so CI catches it. Refresh digests with scripts/pin_images.py.
+
+scripts/check-image-pins.sh asks Nextflow itself (`nextflow inspect`) what every process will run and is the
+ground truth for the pipeline. This test covers what that cannot see: the CDK launcher image, and the
+`// name:tag` comment convention that pin_images.py relies on.
 """
 import re
 import unittest
