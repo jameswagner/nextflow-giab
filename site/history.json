@@ -1,0 +1,56 @@
+{
+  "generated_at": "2026-10-21T02:45:10+00:00",
+  "truth_set": "GIAB HG002 NISTv4.2.1 GRCh38",
+  "region": "chr20",
+  "baseline": {
+    "snp_f1": 0.9898728297664207,
+    "non_snp_f1": 0.9360234766668126,
+    "all_f1": 0.9827042978783471,
+    "max_drop": 0.002,
+    "pipeline_commit": "f2937aa"
+  },
+  "runs": [
+    {
+      "run_id": "hg002-sfn-1020-1119",
+      "started_at": "2026-10-20T18:19:34.804Z",
+      "run_type": "experiment",
+      "revision": "metrics-contract",
+      "commit": "f2937aa",
+      "status": "SUCCEEDED",
+      "gate_status": null,
+      "gate_reasons": null,
+      "params_hash": "sha256:51c450f3eb91",
+      "snp_f1": 0.98987282976642,
+      "non_snp_f1": 0.936023476666812,
+      "all_f1": 0.982704297878347
+    },
+    {
+      "run_id": "demo-default-1020-1606",
+      "started_at": "2026-10-20T23:06:29.271Z",
+      "run_type": "experiment",
+      "revision": "filter-params",
+      "commit": "cd365b4",
+      "status": "SUCCEEDED",
+      "gate_status": "PASS",
+      "gate_reasons": null,
+      "params_hash": "sha256:74d3e03d4d77",
+      "snp_f1": 0.98987282976642,
+      "non_snp_f1": 0.936023476666812,
+      "all_f1": 0.982704297878347
+    },
+    {
+      "run_id": "demo-strict-1020-1606",
+      "started_at": "2026-10-20T23:06:31.188Z",
+      "run_type": "experiment",
+      "revision": "filter-params",
+      "commit": "cd365b4",
+      "status": "REGRESSED",
+      "gate_status": "REGRESSED",
+      "gate_reasons": "snp recall fell 0.6227 (baseline 0.9859, now 0.3632, allowed drop 0.002); snp f1 fell 0.4573 (baseline 0.9899, now 0.5326, allowed drop 0.002); all recall fell 0.5379 (baseline 0.9752, now 0.4373, allowed drop 0.002); all f1 fell 0.3762 (baseline 0.9827, now 0.6065, allowed drop 0.002)",
+      "params_hash": "sha256:b0a349253e0e",
+      "snp_f1": 0.532608248694436,
+      "non_snp_f1": 0.936066372001186,
+      "all_f1": 0.606524258217555
+    }
+  ]
+}

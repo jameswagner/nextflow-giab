@@ -49,6 +49,8 @@ GitHub Actions reach AWS through OIDC roles (no stored keys), each trusted only 
 - **Benchmark (main)**: records an official benchmark for each pipeline change merged to `main`.
 - **Deploy infrastructure**: deploys `InfraStack` when `infra/` changes on `main`, after a person approves it in the `production` environment.
 
+- **Publish benchmark history**: after each `main` benchmark, rebuilds the public dashboard (`site/`, on GitHub Pages) from the run records through a read-only role. `scripts/export_history.py` publishes only an allow-list of fields and refuses anything that looks like an AWS identifier.
+
 The roles live in a separate `GithubIdentityStack`, deployed by hand, so a workflow can never change its own permissions. `scripts/run-benchmark.sh` runs the same benchmark from a terminal (`-r <revision> -w`), or reports on a past run (`-R <run id>`).
 
 Nothing account-specific is committed; the queue, role and bucket come from the stack outputs. `smoke/faidx.nf` is a one-step Batch smoke test, and `smoke/fail.nf` fails on purpose to check the alarms. `cdk destroy` removes everything, including the bucket contents.

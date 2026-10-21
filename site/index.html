@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nextflow-giab benchmark history</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1b1f24; --muted: #59636e; --line: #d0d7de; --panel: #f6f8fa;
+    --snp: #0969da; --indel: #bc4c00; --all: #1a7f37; --bad: #cf222e; --band: rgba(9,105,218,.10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --line: #30363d; --panel: #161b22;
+            --snp: #58a6ff; --indel: #ffa657; --all: #56d364; --bad: #ff7b72; --band: rgba(88,166,255,.14); }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  p { margin: 0 0 12px; color: var(--muted); }
+  a { color: var(--snp); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; margin: 16px 0; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 16px 0; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+  .stat b { display: block; font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: .85rem; }
+  svg { width: 100%; height: auto; display: block; }
+  svg text { fill: var(--muted); font-size: 11px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0 0; font-size: .85rem; color: var(--muted); }
+  .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 6px; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  td.n { text-align: right; }
+  .tag { padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); font-size: .75rem; }
+  .tag.bad { color: var(--bad); border-color: var(--bad); }
+  .scroll { overflow-x: auto; }
+  #error { color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Benchmark history</h1>
+  <p id="subtitle">Loading…</p>
+  <div id="error" role="alert"></div>
+  <div class="stats" id="stats"></div>
+  <div class="panel">
+    <svg id="chart" viewBox="0 0 900 360" role="img" aria-labelledby="chart-title chart-desc">
+      <title id="chart-title">F1 score by benchmark run</title>
+      <desc id="chart-desc">SNP, indel and overall F1 for each run, with the baseline and its allowed drop.</desc>
+    </svg>
+    <div class="legend" id="legend"></div>
+  </div>
+  <div class="panel scroll">
+    <table id="runs"><thead><tr>
+      <th>When (UTC)</th><th>Run</th><th>Revision</th><th>Type</th><th class="n">SNP F1</th><th class="n">Indel F1</th><th class="n">All F1</th><th>Result</th>
+    </tr></thead><tbody></tbody></table>
+  </div>
+  <p>The pipeline is scored against the GIAB HG002 truth set on chr20. A run <em>regresses</em> when a score falls more
+     than the allowed drop below the committed baseline. Run types: <b>main</b> (a change merged to the main branch),
+     <b>pr</b> (a pull request) and <b>experiment</b> (any other run, such as a parameter variant).
+     Source: <a href="https://github.com/jameswagner/nextflow-giab">github.com/jameswagner/nextflow-giab</a>.</p>
+</main>
+<script>
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var SERIES = [
+    { key: "snp_f1", label: "SNP F1", base: "snp_f1", color: "var(--snp)" },
+    { key: "non_snp_f1", label: "Indel and other F1", base: "non_snp_f1", color: "var(--indel)" },
+    { key: "all_f1", label: "All variants F1", base: "all_f1", color: "var(--all)" }
+  ];
+
+  function el(name, attrs, text) {
+    var node = document.createElementNS(NS, name);
+    for (var k in attrs) node.setAttribute(k, attrs[k]);
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+  function html(tag, text, cls) {
+    var node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (cls) node.className = cls;
+    return node;
+  }
+  function f4(x) { return x.toFixed(4); }
+
+  fetch("history.json", { cache: "no-cache" }).then(function (r) {
+    if (!r.ok) throw new Error("history.json: HTTP " + r.status);
+    return r.json();
+  }).then(render).catch(function (e) {
+    document.getElementById("subtitle").textContent = "";
+    document.getElementById("error").textContent = "Could not load the benchmark history (" + e.message + ").";
+  });
+
+  function render(h) {
+    var runs = h.runs, base = h.baseline;
+    document.getElementById("subtitle").textContent =
+      (h.truth_set || "GIAB truth set") + ", " + (h.region || "") + ". Updated " + h.generated_at.replace("T", " ").replace("+00:00", " UTC") + ".";
+
+    // Headline numbers: the baseline, and the latest main-branch run if there is one.
+    var latestMain = runs.filter(function (r) { return r.run_type === "main"; }).pop();
+    var stats = document.getElementById("stats");
+    function stat(value, label) { var d = html("div", undefined, "stat"); d.appendChild(html("b", value)); d.appendChild(html("span", label)); stats.appendChild(d); }
+    stat(f4(base.snp_f1), "SNP F1, baseline");
+    stat(f4(base.non_snp_f1), "Indel and other F1, baseline");
+    stat(f4(base.max_drop), "allowed drop per score");
+    stat(latestMain ? latestMain.status : "no main run yet", "latest main-branch run");
+
+    drawChart(runs, base);
+    fillTable(runs);
+  }
+
+  function drawChart(runs, base) {
+    var svg = document.getElementById("chart");
+    var W = 900, H = 360, L = 56, R = 16, T = 16, B = 56;
+    var values = [];
+    runs.forEach(function (r) { SERIES.forEach(function (s) { values.push(r[s.key]); }); });
+    SERIES.forEach(function (s) { values.push(base[s.base]); });
+    var lo = Math.max(0, Math.floor((Math.min.apply(null, values) - 0.02) * 20) / 20), hi = 1;
+    function y(v) { return T + (H - T - B) * (1 - (v - lo) / (hi - lo)); }
+    function x(i) { return runs.length < 2 ? (L + W - R) / 2 : L + (W - L - R) * i / (runs.length - 1); }
+
+    for (var g = Math.ceil(lo * 20); g <= 20; g++) {
+      var gv = g / 20;
+      svg.appendChild(el("line", { x1: L, x2: W - R, y1: y(gv), y2: y(gv), stroke: "var(--line)", "stroke-width": 1 }));
+      svg.appendChild(el("text", { x: L - 8, y: y(gv) + 4, "text-anchor": "end" }, gv.toFixed(2)));
+    }
+    SERIES.forEach(function (s) {
+      var b = base[s.base];
+      svg.appendChild(el("rect", { x: L, y: y(b), width: W - L - R, height: Math.max(1, y(b - base.max_drop) - y(b)), fill: s.color, opacity: 0.12 }));
+      svg.appendChild(el("line", { x1: L, x2: W - R, y1: y(b), y2: y(b), stroke: s.color, "stroke-width": 1, "stroke-dasharray": "4 3" }));
+    });
+    SERIES.forEach(function (s) {
+      var pts = runs.map(function (r, i) { return x(i) + "," + y(r[s.key]); }).join(" ");
+      if (runs.length > 1) svg.appendChild(el("polyline", { points: pts, fill: "none", stroke: s.color, "stroke-width": 1.5, opacity: 0.55 }));
+      runs.forEach(function (r, i) {
+        var regressed = r.gate_status === "REGRESSED" || r.status === "REGRESSED";
+        var dot = el("circle", { cx: x(i), cy: y(r[s.key]), r: r.run_type === "main" ? 5 : 4,
+          fill: r.run_type === "main" ? s.color : "var(--bg)", stroke: regressed ? "var(--bad)" : s.color, "stroke-width": 2 });
+        dot.appendChild(el("title", {}, r.run_id + " (" + r.run_type + ", " + (r.revision || "?") + "): " + s.label + " " + f4(r[s.key])));
+        svg.appendChild(dot);
+      });
+    });
+    runs.forEach(function (r, i) {
+      var label = el("text", { x: x(i), y: H - B + 16, "text-anchor": "end", transform: "rotate(-30 " + x(i) + " " + (H - B + 16) + ")" },
+        r.commit || (r.started_at || "").slice(5, 10));
+      svg.appendChild(label);
+    });
+    var legend = document.getElementById("legend");
+    SERIES.forEach(function (s) { var d = html("span"); var i = html("i"); i.style.background = s.color; d.appendChild(i); d.appendChild(document.createTextNode(s.label)); legend.appendChild(d); });
+    legend.appendChild(html("span", "Dashed line: baseline. Shaded band: allowed drop. Filled dot: main run. Hollow dot: pull request or experiment. Red outline: regressed."));
+  }
+
+  function fillTable(runs) {
+    var body = document.querySelector("#runs tbody");
+    runs.slice().reverse().forEach(function (r) {
+      var tr = document.createElement("tr");
+      function cell(text, cls) { var td = html("td", text, cls); tr.appendChild(td); return td; }
+      cell((r.started_at || "").replace("T", " ").slice(0, 16));
+      cell(r.run_id);
+      cell((r.revision || "") + (r.commit ? " @ " + r.commit : ""));
+      cell(r.run_type);
+      cell(f4(r.snp_f1), "n"); cell(f4(r.non_snp_f1), "n"); cell(f4(r.all_f1), "n");
+      var result = cell("");
+      var bad = r.status !== "SUCCEEDED";
+      var tag = html("span", r.status, bad ? "tag bad" : "tag");
+      if (r.gate_reasons) tag.title = r.gate_reasons;
+      result.appendChild(tag);
+      body.appendChild(tr);
+    });
+  }
+})();
+</script>
+</body>
+</html>

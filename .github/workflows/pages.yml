@@ -1,0 +1,59 @@
+name: Publish benchmark history
+
+# Rebuilds the public benchmark dashboard (GitHub Pages) from the run records: after each benchmark of
+# main (which dispatches this workflow when it finishes), once a day so experiment runs appear, and on
+# demand. The export reads only an allow-list of fields and refuses to publish anything that looks like
+# an AWS identifier (scripts/export_history.py).
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * *'
+
+permissions: {}
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the history from the run records
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: history
+    permissions:
+      contents: read   # check out the page and the export script
+      id-token: write  # OIDC token for the read-only history role
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_HISTORY_ROLE_ARN }}
+          aws-region: us-east-1
+          mask-aws-account-id: true  # logs are public on a public repository
+          role-session-name: history
+
+      - name: Export the history
+        run: python3 scripts/export_history.py --output site/history.json
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    name: Publish to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write     # publish the site
+      id-token: write  # GitHub Pages verifies the deployment's origin with an OIDC token
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
