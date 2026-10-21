@@ -6,6 +6,38 @@ A germline short-variant pipeline (SNVs and small indels) in Nextflow DSL2, with
 
 **Infrastructure** (`infra/`): an S3 bucket (inputs, work dir, results), a VPC with public subnets and no NAT gateway, a Batch Spot compute environment (scales to zero, capped at 16 vCPUs), and CloudWatch logs with alarms on error lines and failed jobs.
 
+## What each step does
+
+Each step is a Nextflow process in `modules/`, run in its own pinned container. Everything is keyed on the sample ID, never on the order files arrive in.
+
+**Reference prep.** Three small steps prepare the reference genome once, and every sample shares the results. `SAMTOOLS_FAIDX` writes a `.fai` index so tools can jump to any position in the FASTA without reading the whole file. `GATK_DICT` writes the sequence dictionary (contig names and lengths) that GATK requires beside the reference. `BWAMEM2_INDEX` builds the alignment index that bwa-mem2 searches, which is the slow part of reference prep.
+
+**`BWAMEM2_MEM`: align the reads.** Takes the sample's two FASTQ files (the paired reads from the sequencer) and finds where each read best matches the reference, writing a SAM file (text alignments). It stamps every read with a read group (sample name, Illumina platform), which GATK needs later to know which reads belong together.
+
+**`SAMTOOLS_SORT`: sort and index.** Alignments come out in the order the reads were processed. This step sorts them by genomic position, writes a compressed BAM, and indexes it so later tools can fetch any region quickly.
+
+**`SAMTOOLS_FLAGSTAT`: count the alignments.** A quick quality check on the sorted BAM: how many reads there are, how many aligned, how many paired properly. The numbers go to the task log, and a sudden drop in the aligned fraction is the first sign of a bad input or reference.
+
+**`GATK_MARKDUPLICATES`: flag duplicate reads.** Library preparation can copy the same DNA fragment several times, and counting those copies as independent evidence would overstate confidence in a variant. This step finds reads that look like copies of one fragment and flags them (it does not delete them), so the variant caller can ignore the extras. It also writes a metrics file with the duplicate rate.
+
+**`GATK_BASERECALIBRATOR`: learn the sequencer's errors.** Each base in a read has a quality score from the sequencer, and those scores are systematically a little off. This step compares the reads with sites where variation is already well known (dbSNP and the Mills indel set) and builds a table of how much each kind of base call should be corrected.
+
+**`GATK_APPLYBQSR`: apply the corrections.** Rewrites the BAM with the quality scores adjusted by that table. The variant caller trusts these scores, so better-calibrated scores mean fewer false variants and fewer missed ones.
+
+**`GATK_HAPLOTYPECALLER`: propose variants.** Looks for places where the reads disagree with the reference. It re-assembles the reads in each active region into candidate haplotypes and scores them, rather than just counting mismatches, which handles small insertions and deletions well. It runs in GVCF mode, which records evidence for every position, not just the variable ones.
+
+**`GATK_GENOTYPEGVCFS`: decide the genotypes.** Turns that evidence into a VCF (the variant list) by deciding, at each variable site, whether the person has one copy of the change or two. With one sample this is nearly a formality; the GVCF-then-genotype split exists so that several samples could be genotyped together, which this pipeline does not do yet.
+
+**`GATK_HARDFILTER`: drop weak calls.** SNPs (single-letter changes) and indels (small insertions and deletions) behave differently, so each is split out and filtered with its own thresholds, such as depth-normalised quality (`QD`), strand bias (`FS`, `SOR`) and mapping quality (`MQ`). A call that fails is marked in the FILTER column, not deleted, and the two sets are merged back into the final VCF. The thresholds are parameters (`--snp_filter`, `--indel_filter`), validated for safe characters because they end up in a shell command.
+
+**`RTG_FORMAT`: prepare the reference for scoring.** Converts the reference FASTA into the SDF format that RTG Tools reads. This runs only when a truth set is given.
+
+**`RTG_VCFEVAL`: score against the answer key.** Compares the filtered calls with GIAB's truth set for HG002, but only inside the regions GIAB considers high-confidence. It matches variants by the sequence they produce rather than by exact position and spelling, so the same indel written two ways still counts as correct. The result is counts of true positives, false positives and false negatives, plus precision, recall and F1. Calls that failed the filters are ignored.
+
+**`BENCHMARK_METRICS`: write the record.** Reads vcfeval's summary and writes one JSON record in a fixed, versioned format (`schemas/benchmark-metrics.v1.schema.json`). Besides the scores it records where the run came from (pipeline commit, run type, container digests, truth set) and the parameters that can change the scores, together with a hash of them, so two runs can be compared knowing exactly what differed. The logic is in `bin/benchmark_metrics.py`, with its own tests.
+
+**`BENCHMARK_GATE`: pass or fail the change.** Compares the record with a committed baseline (`benchmarks/hg002-chr20.json`) and writes `PASS`, `REGRESSED` (a score dropped by more than the baseline's tolerance, currently 0.002) or `INCOMPARABLE` (different sample, truth set, region or reference, so the comparison would mean nothing). Scores may rise freely, and a run can never change the baseline: updating it is a reviewed edit to that file. This runs only when `--baseline` is given.
+
 ## Run on AWS Batch
 
 ```bash
