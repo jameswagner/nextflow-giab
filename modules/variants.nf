@@ -17,13 +17,14 @@ process EXPORT_VARIANTS {
     script:
     // The shell variables are escaped (\$) so Nextflow leaves them for the shell.
     """
-    # type: snp when the reference and every alternate allele are one base, otherwise non_snp
+    # type: snp when the reference is one base and every alternate allele is a single A, C, G or T; anything else
+    # (indels, MNPs, the * spanning-deletion allele) is non_snp, which is how vcfeval splits its scores
     classify='
       BEGIN { FS = OFS = "\\t" }
       {
         n = split(\$4, alt, ",")
         type = (length(\$3) == 1) ? "snp" : "non_snp"
-        for (i = 1; i <= n; i++) if (length(alt[i]) != 1) type = "non_snp"
+        for (i = 1; i <= n; i++) if (alt[i] !~ /^[ACGTacgt]\$/) type = "non_snp"
         for (i = 5; i <= NF; i++) if (\$i == ".") \$i = "\\\\N"
         print sample, class, \$1, \$2, \$3, \$4, type, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12, \$13, \$14
       }'
