@@ -1,9 +1,11 @@
+nextflow.enable.types = true
+
 process SAMTOOLS_FAIDX {
     input:
-    path fasta
+    fasta: Path
 
     output:
-    path "${fasta}.fai"
+    file("${fasta}.fai")
 
     script:
     "samtools faidx ${fasta}"
@@ -11,10 +13,10 @@ process SAMTOOLS_FAIDX {
 
 process SAMTOOLS_SORT {
     input:
-    tuple val(sample), path(sam)
+    tuple(sample: String, sam: Path)
 
     output:
-    tuple val(sample), path("${sample}.sorted.bam"), path("${sample}.sorted.bam.bai")
+    tuple(sample, file("${sample}.sorted.bam"), file("${sample}.sorted.bam.bai"))
 
     script:
     """
@@ -25,10 +27,10 @@ process SAMTOOLS_SORT {
 
 process SAMTOOLS_FLAGSTAT {
     input:
-    tuple val(sample), path(bam), path(bai)
+    tuple(sample: String, bam: Path, bai: Path)
 
     output:
-    stdout
+    stdout()
 
     script:
     "samtools flagstat ${bam}"

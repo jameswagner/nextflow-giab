@@ -1,3 +1,5 @@
+nextflow.enable.types = true
+
 include { SAMTOOLS_FAIDX; SAMTOOLS_SORT; SAMTOOLS_FLAGSTAT } from './modules/samtools.nf'
 include { BWAMEM2_INDEX; BWAMEM2_MEM } from './modules/bwamem2.nf'
 include { RTG_FORMAT; RTG_VCFEVAL } from './modules/rtg.nf'
@@ -33,7 +35,7 @@ params {
 }
 
 // The filter expressions end up inside a shell command, so allow only what a filter needs.
-def checkFilter(String name, String expression) {
+def checkFilter(name: String, expression: String) {
     if( !(expression ==~ /[A-Za-z0-9_ .<>=!&|()+\-]+/) )
         error "--${name} may only contain letters, digits, spaces and . < > = ! & | ( ) + - _ : got '${expression}'"
 }
@@ -46,7 +48,7 @@ workflow {
     // --- inputs ---
     // One tuple per sample: (sample_id, [fastq_1, fastq_2]). Everything downstream
     // is keyed on sample_id, never on channel order.
-    reads = channel.fromPath(params.samplesheet)
+    reads = channel.of(params.samplesheet)
         .splitCsv(header: true)
         .map { row ->
             tuple(row.sample_id, [
@@ -63,63 +65,66 @@ workflow {
     mills_i = params.mills_tbi
 
     // --- reference prep ---
-    SAMTOOLS_FAIDX(fasta)
-    GATK_DICT(fasta)
-    BWAMEM2_INDEX(fasta)
+    fai = SAMTOOLS_FAIDX(fasta)
+    dict = GATK_DICT(fasta)
 
     // --- align ---
-    BWAMEM2_MEM(reads, BWAMEM2_INDEX.out)
-    SAMTOOLS_SORT(BWAMEM2_MEM.out)
-    SAMTOOLS_FLAGSTAT(SAMTOOLS_SORT.out)
+    bwa_index = BWAMEM2_INDEX(fasta)
+    aligned = BWAMEM2_MEM(reads, bwa_index)
+    sorted = SAMTOOLS_SORT(aligned)
+    SAMTOOLS_FLAGSTAT(sorted)
 
     // --- clean up reads ---
-    GATK_MARKDUPLICATES(SAMTOOLS_SORT.out)
-    GATK_BASERECALIBRATOR(
-        GATK_MARKDUPLICATES.out.bam, fasta, SAMTOOLS_FAIDX.out, GATK_DICT.out,
+    dedup = GATK_MARKDUPLICATES(sorted)
+    recal = GATK_BASERECALIBRATOR(
+        dedup.bam, fasta, fai, dict,
         dbsnp, dbsnp_i, mills, mills_i)
-    GATK_APPLYBQSR(
-        GATK_MARKDUPLICATES.out.bam.join(GATK_BASERECALIBRATOR.out),
-        fasta, SAMTOOLS_FAIDX.out, GATK_DICT.out)
+    recalibrated = GATK_APPLYBQSR(
+        dedup.bam.join(recal, by: 'sample'),
+        fasta, fai, dict)
 
     // --- call and filter variants ---
-    GATK_HAPLOTYPECALLER(GATK_APPLYBQSR.out, fasta, SAMTOOLS_FAIDX.out, GATK_DICT.out)
-    GATK_GENOTYPEGVCFS(GATK_HAPLOTYPECALLER.out, fasta, SAMTOOLS_FAIDX.out, GATK_DICT.out)
-    GATK_HARDFILTER(GATK_GENOTYPEGVCFS.out, fasta, SAMTOOLS_FAIDX.out, GATK_DICT.out,
+    gvcf = GATK_HAPLOTYPECALLER(recalibrated, fasta, fai, dict)
+    raw = GATK_GENOTYPEGVCFS(gvcf, fasta, fai, dict)
+    filtered = GATK_HARDFILTER(raw, fasta, fai, dict,
                     params.snp_filter, params.indel_filter)
 
     // --- score against a truth set, if one was given ---
     benchmark = channel.empty()
     if( params.truth_vcf ) {
-        RTG_FORMAT(fasta)
-        RTG_VCFEVAL(
-            GATK_HARDFILTER.out, RTG_FORMAT.out,
+        rtg_ref = RTG_FORMAT(fasta)
+        evaluated = RTG_VCFEVAL(
+            filtered, rtg_ref,
             params.truth_vcf, params.truth_vcf_tbi, params.truth_bed, params.eval_region)
 
+        // Everything in the record's run details is passed as text.
         run_meta = [
-            run_type: params.run_type, pr_number: params.pr_number, base_commit: params.base_commit,
-            run_name: workflow.runName, session_id: workflow.sessionId, started_at: workflow.start,
-            repository: workflow.repository, revision: workflow.revision, head_commit: workflow.commitId,
-            nextflow_version: nextflow.version, truth_set: params.truth_set,
-            containers: workflow.container instanceof Map ? workflow.container : [:]
+            run_type: params.run_type,
+            pr_number: params.pr_number ? "${params.pr_number}" : '',
+            base_commit: params.base_commit ?: '',
+            run_name: "${workflow.runName}", session_id: "${workflow.sessionId}", started_at: "${workflow.start}",
+            repository: workflow.repository ?: '', revision: workflow.revision ?: '', head_commit: workflow.commitId ?: '',
+            nextflow_version: "${nextflow.version}", truth_set: params.truth_set ?: ''
         ]
-        BENCHMARK_METRICS(
-            RTG_VCFEVAL.out, run_meta,
+        container_map = workflow.container instanceof Map ? workflow.container : [:]
+        metrics_json = BENCHMARK_METRICS(
+            evaluated, run_meta, container_map,
             params.truth_vcf.name, params.truth_bed.name, params.fasta.name, params.eval_region,
             [eval_region: params.eval_region ?: '', snp_filter: params.snp_filter, indel_filter: params.indel_filter])
-        benchmark = RTG_VCFEVAL.out.mix(BENCHMARK_METRICS.out)
+        benchmark = evaluated.mix(metrics_json)
 
         // A relative baseline path is relative to the pipeline's own checkout, not the launch directory.
         if( params.baseline ) {
             baseline_path = params.baseline.contains('://') || params.baseline.startsWith('/')
                 ? params.baseline : "${projectDir}/${params.baseline}"
-            BENCHMARK_GATE(BENCHMARK_METRICS.out, file(baseline_path, checkIfExists: true))
-            benchmark = benchmark.mix(BENCHMARK_GATE.out)
+            gate = BENCHMARK_GATE(metrics_json, file(baseline_path, checkIfExists: true))
+            benchmark = benchmark.mix(gate)
         }
     }
 
     publish:
-    vcf       = GATK_HARDFILTER.out
-    metrics   = GATK_MARKDUPLICATES.out.metrics
+    vcf       = filtered
+    metrics   = dedup.metrics
     benchmark = benchmark
 }
 

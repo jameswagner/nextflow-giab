@@ -1,27 +1,30 @@
+nextflow.enable.types = true
+
 // Turn vcfeval output into a schema-versioned metrics record (schemas/benchmark-metrics.v1.schema.json).
 // The logic and its tests live in bin/benchmark_metrics.py; this step only passes in the run details.
 // Render an optional command-line flag: omitted entirely when the value is empty.
-def opt(String flag, value) {
+def opt(flag: String, value: String) -> String {
     return value ? "${flag} '${value}'" : ''
 }
 
 process BENCHMARK_METRICS {
     input:
-    tuple val(sample), path(vcfeval_dir)
-    val run_meta    // map: run_type, pr_number, base_commit, run_name, session_id, started_at,
+    tuple(sample: String, vcfeval_dir: Path)
+    run_meta: Map<String,String>  // keys: run_type, pr_number, base_commit, run_name, session_id, started_at,
                     // repository, revision, head_commit, nextflow_version, truth_set, containers
-    val truth_vcf   // file names only, never S3 URIs (no bucket names in the record)
-    val truth_bed
-    val reference
-    val region
-    val analysis_params   // map of settings that can change the scores; hashed into the record
+    containers: Map<String,String>
+    truth_vcf: String  // file names only, never S3 URIs (no bucket names in the record)
+    truth_bed: String
+    reference: String
+    region: String
+    analysis_params: Map<String,String>  // map of settings that can change the scores; hashed into the record
 
     output:
-    tuple val(sample), path("${sample}.metrics.json")
+    tuple(sample, file("${sample}.metrics.json"))
 
     script:
-    def analysis = analysis_params.collect { name, value -> "--param '${name}=${value}'" }.join(' ')
-    def containers = run_meta.containers.collect { name, image -> "--container '${name}=${image}'" }.join(' ')
+    def analysis = analysis_params.keySet().collect { name -> "--param '${name}=${analysis_params[name]}'" }.join(' ')
+    def container_args = containers.keySet().collect { name -> "--container '${name}=${containers[name]}'" }.join(' ')
     """
     benchmark_metrics.py \\
         --vcfeval-dir ${vcfeval_dir} --sample ${sample} --output ${sample}.metrics.json \\
@@ -31,7 +34,7 @@ process BENCHMARK_METRICS {
         ${opt('--nextflow-version', run_meta.nextflow_version)} ${opt('--truth-set', run_meta.truth_set)} \\
         --truth-vcf ${truth_vcf} --truth-bed ${truth_bed} --reference ${reference} ${opt('--region', region)} \\
         ${analysis} \\
-        ${containers}
+        ${container_args}
     """
 }
 
@@ -40,11 +43,11 @@ process BENCHMARK_METRICS {
 // truth set, region or reference). The result is data, so a regression still publishes it.
 process BENCHMARK_GATE {
     input:
-    tuple val(sample), path(metrics_json)
-    path baseline
+    tuple(sample: String, metrics_json: Path)
+    baseline: Path
 
     output:
-    tuple val(sample), path("${sample}.gate.json")
+    tuple(sample, file("${sample}.gate.json"))
 
     script:
     """

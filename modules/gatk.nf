@@ -1,9 +1,11 @@
+nextflow.enable.types = true
+
 process GATK_DICT {
     input:
-    path fasta
+    fasta: Path
 
     output:
-    path "${fasta.baseName}.dict"
+    file("${fasta.baseName}.dict")
 
     script:
     """
@@ -13,11 +15,11 @@ process GATK_DICT {
 
 process GATK_MARKDUPLICATES {
     input:
-    tuple val(sample), path(bam), path(bai)
+    tuple(sample: String, bam: Path, bai: Path)
 
     output:
-    tuple val(sample), path("${sample}.md.bam"), path("${sample}.md.bai"), emit: bam
-    path "${sample}.md.metrics.txt", emit: metrics
+    bam = record(sample: sample, bam: file("${sample}.md.bam"), bai: file("${sample}.md.bai"))
+    metrics = file("${sample}.md.metrics.txt")
 
     script:
     """
@@ -31,17 +33,17 @@ process GATK_MARKDUPLICATES {
 
 process GATK_BASERECALIBRATOR {
     input:
-    tuple val(sample), path(bam), path(bai)
-    path fasta
-    path fai
-    path dict
-    path dbsnp
-    path dbsnp_tbi
-    path mills
-    path mills_tbi
+    record(sample: String, bam: Path, bai: Path)
+    fasta: Path
+    fai: Path
+    dict: Path
+    dbsnp: Path
+    dbsnp_tbi: Path
+    mills: Path
+    mills_tbi: Path
 
     output:
-    tuple val(sample), path("${sample}.recal.table")
+    record(sample: sample, table: file("${sample}.recal.table"))
 
     script:
     """
@@ -56,13 +58,13 @@ process GATK_BASERECALIBRATOR {
 
 process GATK_APPLYBQSR {
     input:
-    tuple val(sample), path(bam), path(bai), path(table)
-    path fasta
-    path fai
-    path dict
+    record(sample: String, bam: Path, bai: Path, table: Path)
+    fasta: Path
+    fai: Path
+    dict: Path
 
     output:
-    tuple val(sample), path("${sample}.recal.bam"), path("${sample}.recal.bai")
+    tuple(sample, file("${sample}.recal.bam"), file("${sample}.recal.bai"))
 
     script:
     """
@@ -76,13 +78,13 @@ process GATK_APPLYBQSR {
 
 process GATK_HAPLOTYPECALLER {
     input:
-    tuple val(sample), path(bam), path(bai)
-    path fasta
-    path fai
-    path dict
+    tuple(sample: String, bam: Path, bai: Path)
+    fasta: Path
+    fai: Path
+    dict: Path
 
     output:
-    tuple val(sample), path("${sample}.g.vcf.gz"), path("${sample}.g.vcf.gz.tbi")
+    tuple(sample, file("${sample}.g.vcf.gz"), file("${sample}.g.vcf.gz.tbi"))
 
     script:
     """
@@ -96,13 +98,13 @@ process GATK_HAPLOTYPECALLER {
 
 process GATK_GENOTYPEGVCFS {
     input:
-    tuple val(sample), path(gvcf), path(gvcf_tbi)
-    path fasta
-    path fai
-    path dict
+    tuple(sample: String, gvcf: Path, gvcf_tbi: Path)
+    fasta: Path
+    fai: Path
+    dict: Path
 
     output:
-    tuple val(sample), path("${sample}.vcf.gz"), path("${sample}.vcf.gz.tbi")
+    tuple(sample, file("${sample}.vcf.gz"), file("${sample}.vcf.gz.tbi"))
 
     script:
     """
@@ -115,15 +117,15 @@ process GATK_GENOTYPEGVCFS {
 
 process GATK_HARDFILTER {
     input:
-    tuple val(sample), path(vcf), path(tbi)
-    path fasta
-    path fai
-    path dict
-    val snp_filter      // GATK filter expressions; validated in main.nf (safe characters only)
-    val indel_filter
+    tuple(sample: String, vcf: Path, tbi: Path)
+    fasta: Path
+    fai: Path
+    dict: Path
+    snp_filter: String  // GATK filter expressions; validated in main.nf (safe characters only)
+    indel_filter: String
 
     output:
-    tuple val(sample), path("${sample}.filtered.vcf.gz"), path("${sample}.filtered.vcf.gz.tbi")
+    tuple(sample, file("${sample}.filtered.vcf.gz"), file("${sample}.filtered.vcf.gz.tbi"))
 
     script:
     """
