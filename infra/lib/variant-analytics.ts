@@ -15,7 +15,7 @@ const RESULTS_PREFIX = 'athena-results/';
 // (modules/variants.nf, bin/variants_to_parquet.py). Keep this list in step with COLUMNS in that script.
 const COLUMNS: { name: string; type: string; comment: string }[] = [
   { name: 'sample_id', type: 'string', comment: 'Sample name from the samplesheet' },
-  { name: 'outcome', type: 'string', comment: 'tp (matches the truth set), fp (not in it), fn (truth variant missed) or outside (call outside the scored regions)' },
+  { name: 'outcome', type: 'string', comment: 'tp (matches the truth set), fp (not in it), fn (truth variant missed), outside (call outside the scored regions) or called (a call from a sample with no truth set)' },
   { name: 'chrom', type: 'string', comment: 'Chromosome' },
   { name: 'pos', type: 'bigint', comment: '1-based position' },
   { name: 'ref', type: 'string', comment: 'Reference allele' },
@@ -141,6 +141,12 @@ export class VariantAnalytics extends Construct {
         name: 'giab: what a stricter QD cutoff would do',
         description: 'False positives a cutoff on QD would remove and true calls it would lose, per variant type. Change 4.0 to try another cutoff.',
         sql: `SELECT variant_type,\n  count_if(outcome = 'fp' AND qd < 4.0) AS false_positives_removed,\n  count_if(outcome = 'tp' AND qd < 4.0) AS true_calls_lost\nFROM ${DATABASE}.${TABLE}\nWHERE run_id = 'RUN_ID' AND outcome IN ('tp', 'fp')\nGROUP BY variant_type;`,
+      },
+      {
+        id: 'CallsPerMegabase',
+        name: 'giab: variants per megabase',
+        description: 'Calls per megabase by variant type. Works for any run, including a sample with no truth set, whose calls are labelled "called".',
+        sql: `SELECT chrom, pos / 1000000 AS megabase, variant_type, count(*) AS variants\nFROM ${DATABASE}.${TABLE}\nWHERE run_id = 'RUN_ID' AND outcome IN ('called', 'tp', 'fp', 'outside')\nGROUP BY chrom, pos / 1000000, variant_type\nORDER BY chrom, megabase, variant_type;`,
       },
       {
         id: 'ChildOnlyCalls',
