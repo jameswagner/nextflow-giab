@@ -1,10 +1,114 @@
 # nextflow-giab
 
-A germline short-variant pipeline (SNVs and small indels) in Nextflow DSL2, with the AWS Batch infrastructure to run it defined in CDK (TypeScript).
+A germline short-variant pipeline (SNVs and small indels) in Nextflow DSL2, with the AWS infrastructure to run it defined in CDK (TypeScript), and a benchmark that scores every run against a published answer key. It is a research-grade demo built with clinical-lab habits: pinned tools, full provenance for every run, and a regression gate that fails a change that makes results worse. It handles public data only and is not a clinical pipeline (see [What this is not](#what-this-is-not)).
 
-**Pipeline** (`main.nf`, `modules/`): `bwa-mem2` alignment → `samtools` sort and flagstat → GATK MarkDuplicates → BQSR → HaplotypeCaller (GVCF) → GenotypeGVCFs → hard filtering (SNPs and indels separately). Inputs are a samplesheet CSV (`sample_id,fastq_1,fastq_2`) plus a GRCh38 reference and dbSNP and Mills known-sites VCFs. Outputs are a filtered VCF and MarkDuplicates metrics, plus a vcfeval score if a truth set is given.
+- **Live results:** https://jameswagner.github.io/nextflow-giab/ (benchmark history, rebuilt after each merge).
+- **Accuracy:** on GIAB HG002, chr20 at about 30x, SNP F1 0.990 and indel F1 0.936. A deliberately broken SNP filter drops SNP F1 to 0.533 and the gate fails it.
+- **Cost and speed:** about 57 minutes and about 30 cents per run, on Spot machines that scale to zero.
+- **No stored cloud keys:** GitHub Actions reach AWS through OIDC roles, each trusted for one environment of this repository.
 
-**Infrastructure** (`infra/`): an S3 bucket (inputs, work dir, results), a VPC with public subnets and no NAT gateway, a Batch Spot compute environment (scales to zero, capped at 16 vCPUs), and CloudWatch logs with alarms on error lines and failed jobs.
+## How it fits together
+
+The variant-calling pipeline (`main.nf`). Dashed steps run only when a truth set is given:
+
+```mermaid
+flowchart TD
+  fq[/"FASTQ pair"/] --> mem
+  ref[/"Reference FASTA"/] --> faidx[samtools faidx]
+  ref --> dict[GATK dict]
+  ref --> idx[bwa-mem2 index]
+  idx --> mem[bwa-mem2 mem<br/>align reads]
+  mem --> sort[samtools sort]
+  sort --> flag[samtools flagstat]
+  sort --> md[GATK MarkDuplicates]
+  md --> bqsr[GATK BaseRecalibrator]
+  known[/"dbSNP + Mills<br/>known sites"/] --> bqsr
+  md --> apply[GATK ApplyBQSR]
+  bqsr --> apply
+  apply --> hc[GATK HaplotypeCaller<br/>GVCF]
+  hc --> gt[GATK GenotypeGVCFs]
+  gt --> filt["GATK hard filter<br/>SNP and indel expressions"]
+  filt --> vcf[/"Filtered VCF"/]
+  filt -.-> eval[RTG vcfeval]
+  truth[/"Truth VCF + BED"/] -.-> eval
+  eval -.-> metrics[BENCHMARK_METRICS<br/>metrics.json]
+  metrics -.->|if --baseline| gate[BENCHMARK_GATE<br/>gate.json]
+  base[/"Committed baseline"/] -.-> gate
+  eval -.-> export[EXPORT_VARIANTS<br/>one row per variant]
+  filt -.-> export
+  export -.-> parquet[/"variants.parquet"/]
+```
+
+The AWS side. A Step Functions state machine owns each run's lifecycle, Nextflow runs inside a Fargate job, and its steps run on Spot workers:
+
+```mermaid
+flowchart LR
+  user([You or a GitHub workflow]) -->|StartExecution| sm
+  subgraph aws[AWS account, us-east-1]
+    direction LR
+    sm[["Step Functions<br/>run state machine"]]
+    ddb[(DynamoDB<br/>run records)]
+    closer[["Step Functions<br/>record closer"]]
+    eb{{EventBridge<br/>execution ended}}
+    sns>SNS alert topic]
+    subgraph batch[AWS Batch]
+      lq[Launcher queue<br/>Fargate, on-demand]
+      launcher["Nextflow launcher job<br/>pulls the pipeline from GitHub"]
+      wq[Worker queue<br/>EC2 Spot, 0 to 16 vCPUs]
+      workers["Pipeline steps<br/>bwa-mem2, GATK, RTG, bcftools"]
+      lq --> launcher
+      launcher -->|submits each step| wq --> workers
+    end
+    s3[("S3 bucket<br/>inputs, work/, runs/")]
+    cw[CloudWatch<br/>logs, filter, alarms]
+    athena[Athena workgroup<br/>SQL over variants]
+    sm -->|1 record RUNNING| ddb
+    sm -->|2 submit and wait| lq
+    sm -->|3 read metrics.json, gate.json| s3
+    sm -->|4 record outcome| ddb
+    sm -->|5 notify| sns
+    sm -. status change .-> eb --> closer -->|close if still RUNNING| ddb
+    launcher <--> s3
+    workers <--> s3
+    launcher -. logs .-> cw
+    workers -. logs .-> cw
+    cw -.->|alarm| sns
+    athena -.->|"reads runs/*/variants"| s3
+  end
+  gh[(GitHub repository<br/>pipeline code)] -.->|nextflow run repo -r revision| launcher
+```
+
+A run, start to finish:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as You / GitHub workflow
+  participant SM as Run state machine
+  participant D as DynamoDB
+  participant L as Nextflow launcher (Fargate)
+  participant W as Spot workers
+  participant S as S3
+  U->>SM: start-run.sh (sample, revision, params)
+  SM->>D: record RUNNING
+  SM->>L: submit launcher job and wait
+  L->>L: nextflow run repo at revision
+  loop each pipeline step
+    L->>W: submit Batch job
+    W->>S: read inputs, write work files
+  end
+  L->>S: publish results, metrics.json, gate.json, variants.parquet
+  L-->>SM: job finished
+  SM->>S: read metrics.json and gate.json
+  alt gate PASS or no gate
+    SM->>D: record SUCCEEDED + scores
+  else gate REGRESSED or INCOMPARABLE
+    SM->>D: record REGRESSED / INCOMPARABLE + reasons
+  end
+  Note over SM,D: A stopped or timed-out execution is closed by an EventBridge rule and a small state machine.
+```
+
+**Inputs** are a samplesheet CSV (`sample_id,fastq_1,fastq_2`) plus a GRCh38 reference and dbSNP and Mills known-sites VCFs. **Outputs** are a filtered VCF and MarkDuplicates metrics, and, if a truth set is given, a vcfeval score, a metrics record, an optional gate result and a table of every variant.
 
 ## What each step does
 
@@ -37,6 +141,10 @@ Each step is a Nextflow process in `modules/`, run in its own pinned container. 
 **`BENCHMARK_METRICS`: write the record.** Reads vcfeval's summary and writes one JSON record in a fixed, versioned format (`schemas/benchmark-metrics.v1.schema.json`). Besides the scores it records where the run came from (pipeline commit, run type, container digests, truth set) and the parameters that can change the scores, together with a hash of them, so two runs can be compared knowing exactly what differed. The logic is in `bin/benchmark_metrics.py`, with its own tests.
 
 **`BENCHMARK_GATE`: pass or fail the change.** Compares the record with a committed baseline (`benchmarks/hg002-chr20.json`) and writes `PASS`, `REGRESSED` (a score dropped by more than the baseline's tolerance, currently 0.002) or `INCOMPARABLE` (different sample, truth set, region or reference, so the comparison would mean nothing). Scores may rise freely, and a run can never change the baseline: updating it is a reviewed edit to that file. This runs only when `--baseline` is given.
+
+**`EXPORT_VARIANTS`: one row per variant.** Turns vcfeval's answer into a table you can query. Every call gets a label: `tp` (matches the truth set), `fp` (not in it), `fn` (a truth variant the calls missed, with only its position and alleles known), or `outside` (a PASS call outside the scored regions, which vcfeval ignores). Each row carries the GATK annotations the filters use, so a question like "what would a stricter QD cutoff remove?" is a query. It runs only when a truth set is given.
+
+**`CONVERT_VARIANTS_PARQUET`: the table as Parquet.** Rewrites that table with typed columns and real nulls (a missed variant has no quality score, which is a null and not the text "\\N"), and publishes it at `runs/<run id>/variants/`, where Athena reads it.
 
 ## Run on AWS Batch
 
@@ -99,8 +207,42 @@ Scored with RTG `vcfeval` against the GIAB v4.2.1 truth set for HG002 (GRCh38), 
 
 This is one sample and one chromosome, scored with the conservative `_noinconsistent` BED, so it is a sanity check and not a validation. The library was designed for assembly (overlapping 2x250 reads), vcfeval skipped at least one region as too complex, and about 27% of calls fall outside the high-confidence regions and are not scored. The hard filters are parameters (`--snp_filter` and `--indel_filter`, GATK filter expressions; a record is filtered if the expression is true), defaulting to the standard thresholds in `main.nf`. Changing them is an experiment: the values are recorded in the benchmark's `params` and change its `params_hash`. Only letters, digits, spaces and `. < > = ! & | ( ) + - _` are accepted, because the expressions end up in a shell command. To score a run, pass `--truth_vcf`, `--truth_vcf_tbi`, `--truth_bed` and `--eval_region` (optionally `--truth_set` as a label). vcfeval's own files land in `benchmark/<sample>.vcfeval/`, and `benchmark/<sample>.metrics.json` holds the scores plus provenance (pipeline commit, run type, containers, truth set, parameters and their hash) in the format defined by `schemas/benchmark-metrics.v1.schema.json`. The generator is `bin/benchmark_metrics.py`; its tests run with `python3 -m unittest discover -s tests`. To also check a run against expected scores, pass `--baseline benchmarks/hg002-chr20.json`: `benchmark/<sample>.gate.json` then says `PASS`, `REGRESSED` (a score fell by more than the baseline's tolerance, currently 0.002) or `INCOMPARABLE` (different sample, truth set, region or reference). Scores may rise freely, and a run never changes the baseline; updating it is a reviewed edit to that file. All container images are pinned in `conf/containers.config`.
 
+The default test data (nf-core/test-datasets, commit `76179c1`) is a 40 kb slice of chr22 and only about 2% of its reads align, so it gives an empty VCF; it checks the plumbing, not accuracy.
+
 ### Recreating the inputs
 
 The benchmark inputs are built from GIAB's public data by `prep/giab_sample.nf`, a small Nextflow workflow that runs on AWS through the same launcher: it slices chr20 from the sample's 2x250 Illumina BAM (reading only that chromosome from the remote file), downsamples to about 30x, converts to FASTQ, fetches the v4.2.1 truth set and writes a samplesheet. `scripts/prepare-giab-sample.sh HG003` starts it for HG002, HG003 or HG004 and publishes everything under `s3://<bucket>/results/giab-<sample>/`. The reference and the dbSNP and Mills files are shared by every sample (see `benchmarks/hg002-chr20.args`).
 
-The default test data (nf-core/test-datasets, commit `76179c1`) is a 40 kb slice of chr22 and only about 2% of its reads align, so it gives an empty VCF; it checks the plumbing, not accuracy.
+## Querying the variants
+
+Athena runs SQL over every run's variant table, with nothing to keep running. The `giab` workgroup (results in the bucket, each query capped at 1 GiB scanned) and the `variants` table (Parquet at `runs/<run id>/variants/`, partitioned by `run_id`) are defined in `infra/lib/variant-analytics.ts`, together with three saved queries: outcome counts for a run (they equal the counts in its `metrics.json`), where a run misses variants, and what a stricter QD cutoff would remove and cost. A query has to say which runs it means (`WHERE run_id = '<id>'`, or `run_id IN (...)`), because the table does not scan every run. A managed policy grants exactly what querying needs and is attached to no one.
+
+```sql
+SELECT outcome, variant_type, count(*) AS variants
+FROM giab.variants
+WHERE run_id = '<run id>'
+GROUP BY outcome, variant_type;
+```
+
+## What this is not
+
+This is a research demo on public data (GIAB reference samples), not a clinical pipeline, and it makes no claim of clinical or regulatory validity.
+
+- **Scope of the validation.** One chromosome (chr20) of a few GIAB samples, scored with the conservative `_noinconsistent` BED. There is no whole-genome or exome run, no stratified breakdown by difficult regions, and no sample-level QC (contamination, sex check, coverage thresholds).
+- **No interpretation.** The pipeline stops at a filtered VCF. There is no annotation, classification or reporting, which are the regulated, human parts of clinical work.
+- **No patient data.** Handling it would need customer-managed encryption keys, an audit trail (CloudTrail data events, S3 access logs), private networking with no public IPs, retained and access-controlled data, per-study data roles, and a regulatory review. None of that is built. Workers currently sit in public subnets, with a security group that allows no inbound traffic, to avoid the cost of a NAT gateway.
+- **What it does show.** Pinned containers (every image by digest), a provenance record for every run (pipeline commit, container digests, truth set, parameters and their hash), and a committed baseline that a change must not fall below, which is change control in miniature.
+
+## Repository layout
+
+| Path | What is there |
+|---|---|
+| `main.nf`, `modules/` | The variant-calling pipeline and its steps |
+| `prep/` | The workflow that builds benchmark inputs from public GIAB data |
+| `conf/` | Profiles: containers (pinned by digest), AWS Batch, chr20 resources, toy data |
+| `bin/`, `schemas/`, `tests/` | Python for the metrics record, the gate and the Parquet export; their JSON schemas and tests |
+| `benchmarks/` | The committed baseline and the input arguments for each benchmark |
+| `infra/` | The AWS stack in CDK: Batch, S3, Step Functions, DynamoDB, Athena, GitHub OIDC roles; with cdk-nag tests |
+| `scripts/` | Starting runs, preparing samples, pinning images, exporting history |
+| `site/` | The public dashboard (GitHub Pages) |
+| `.github/workflows/` | CI, benchmarks for pull requests and for `main`, infrastructure deploys, the dashboard |
