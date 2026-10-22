@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib/core';
 import * as athena from 'aws-cdk-lib/aws-athena';
 import * as glue from 'aws-cdk-lib/aws-glue';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as lakeformation from 'aws-cdk-lib/aws-lakeformation';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 
@@ -87,6 +88,23 @@ export class VariantAnalytics extends Construct {
     });
     table.addDependency(database);
 
+    // Where an account's Lake Formation defaults put new Glue databases under Lake Formation grants, nobody can
+    // read the table's data until someone is granted SELECT on it (DESCRIBE works, SELECT fails with "not
+    // authorized"). Everything else here is governed by IAM, so hand these two resources to IAM too: whoever has the
+    // QueryPolicy below can then query, and no separate grant is needed.
+    for (const [name, resource] of [
+      ['IamOnlyDatabase', { database: { catalogId, name: DATABASE } }],
+      ['IamOnlyTable', { table: { catalogId, databaseName: DATABASE, name: TABLE } }],
+    ] as const) {
+      const grant = new lakeformation.CfnPrincipalPermissions(this, name, {
+        principal: { dataLakePrincipalIdentifier: 'IAM_ALLOWED_PRINCIPALS' },
+        resource,
+        permissions: ['ALL'],
+        permissionsWithGrantOption: [],
+      });
+      grant.addDependency(table);
+    }
+
     const workGroup = new athena.CfnWorkGroup(this, 'WorkGroup', {
       name: WORKGROUP,
       description: 'Queries over nextflow-giab results; each query may scan at most 1 GiB',
@@ -123,6 +141,12 @@ export class VariantAnalytics extends Construct {
         name: 'giab: what a stricter QD cutoff would do',
         description: 'False positives a cutoff on QD would remove and true calls it would lose, per variant type. Change 4.0 to try another cutoff.',
         sql: `SELECT variant_type,\n  count_if(outcome = 'fp' AND qd < 4.0) AS false_positives_removed,\n  count_if(outcome = 'tp' AND qd < 4.0) AS true_calls_lost\nFROM ${DATABASE}.${TABLE}\nWHERE run_id = 'RUN_ID' AND outcome IN ('tp', 'fp')\nGROUP BY variant_type;`,
+      },
+      {
+        id: 'ChildOnlyCalls',
+        name: 'giab: calls in a child that neither parent called',
+        description: 'Trio check. Replace CHILD_RUN, DAD_RUN and MOM_RUN with the three run ids. Child-only calls that scored fp are errors; tp ones are real variants the parents\' calls missed (or true de novo, which are rare).',
+        sql: `WITH child AS (SELECT chrom, pos, ref, alt, outcome, variant_type FROM ${DATABASE}.${TABLE} WHERE run_id = 'CHILD_RUN' AND outcome IN ('tp', 'fp', 'outside')),\ndad AS (SELECT chrom, pos, ref, alt FROM ${DATABASE}.${TABLE} WHERE run_id = 'DAD_RUN' AND outcome IN ('tp', 'fp', 'outside')),\nmom AS (SELECT chrom, pos, ref, alt FROM ${DATABASE}.${TABLE} WHERE run_id = 'MOM_RUN' AND outcome IN ('tp', 'fp', 'outside'))\nSELECT c.outcome, c.variant_type, count(*) AS child_only_calls\nFROM child c\nLEFT JOIN dad d ON c.chrom = d.chrom AND c.pos = d.pos AND c.ref = d.ref AND c.alt = d.alt\nLEFT JOIN mom m ON c.chrom = m.chrom AND c.pos = m.pos AND c.ref = m.ref AND c.alt = m.alt\nWHERE d.pos IS NULL AND m.pos IS NULL\nGROUP BY c.outcome, c.variant_type\nORDER BY c.outcome, c.variant_type;`,
       },
     ];
     for (const query of saved) {
