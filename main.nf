@@ -4,7 +4,7 @@ include { SAMTOOLS_FAIDX; SAMTOOLS_SORT; SAMTOOLS_FLAGSTAT } from './modules/sam
 include { BWAMEM2_INDEX; BWAMEM2_MEM } from './modules/bwamem2.nf'
 include { RTG_FORMAT; RTG_VCFEVAL } from './modules/rtg.nf'
 include { BENCHMARK_METRICS; BENCHMARK_GATE } from './modules/benchmark.nf'
-include { EXPORT_VARIANTS; CONVERT_VARIANTS_PARQUET } from './modules/variants.nf'
+include { EXPORT_VARIANTS; EXPORT_CALLED_VARIANTS; CONVERT_VARIANTS_PARQUET } from './modules/variants.nf'
 include { GATK_DICT; GATK_MARKDUPLICATES; GATK_BASERECALIBRATOR; GATK_APPLYBQSR;
           GATK_HAPLOTYPECALLER; GATK_GENOTYPEGVCFS; GATK_HARDFILTER } from './modules/gatk.nf'
 
@@ -128,6 +128,10 @@ workflow {
             gate = BENCHMARK_GATE(metrics_json, file(baseline_path, checkIfExists: true))
             benchmark = benchmark.mix(gate)
         }
+    } else {
+        // No truth set (a new sample): still write every PASS call as a table row, labelled "called".
+        variants_table = EXPORT_CALLED_VARIANTS(filtered)
+        variants = CONVERT_VARIANTS_PARQUET(variants_table)
     }
 
     publish:
